@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MAISON ÉTÉ · 30대 여성 셀렉트샵</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN은 버전 고정. Babel 은 반드시 7.x (8.x는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            serif: ['"Cormorant Garamond"', 'serif'],
+            sans: ['"Noto Sans KR"', 'sans-serif'],
+          },
+          colors: {
+            cream: '#f7f3ee',
+            sand: '#e8dfd3',
+            taupe: '#8a7867',
+            ink: '#2b2622',
+            rose: '#b8857a',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+    .fade-up { animation: fadeUp .45s ease both; }
+    @keyframes slideIn { from { transform: translateX(100%); } to { transform: none; } }
+    .slide-in { animation: slideIn .3s ease both; }
+  </style>
+</head>
+<body class="bg-cream text-ink font-sans antialiased">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useCallback, useRef, createContext, useContext } = React;
+
+    // ========================================
+    // 📡 API & Constants (상품 데이터는 서버 DB에서 받아온다)
+    // ========================================
+    const API_BASE_URL = "/api";
+
+    const CATEGORIES = ["전체", "아우터", "상의", "하의", "원피스", "가방", "슈즈", "액세서리"];
+
+    const SORTS = [
+      { key: 'recommend', label: '추천순' },
+      { key: 'low', label: '낮은 가격순' },
+      { key: 'high', label: '높은 가격순' },
+      { key: 'review', label: '리뷰 많은순' },
+    ];
+
+    const won = (n) => n.toLocaleString('ko-KR') + '원';
+    const finalPrice = (p) => p.salePrice ?? p.price;
+    const discountRate = (p) => (p.salePrice ? Math.round((1 - p.salePrice / p.price) * 100) : 0);
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled = false, onClick, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-ink text-cream hover:bg-black',
+        secondary: 'bg-white text-ink border border-sand hover:border-taupe',
+        danger: 'bg-red-600 text-white hover:bg-red-700',
+        ghost: 'bg-transparent text-ink hover:bg-sand/50',
+      };
+      const sizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2.5 text-sm', lg: 'px-6 py-3.5 text-base' };
+      return (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-2 rounded-full font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-rose disabled:opacity-40 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ type = 'text', label, value, onChange, placeholder, error, disabled = false, className = '', id }) {
+      const inputId = id || label;
+      return (
+        <label htmlFor={inputId} className={`block ${className}`}>
+          {label && <span className="mb-1.5 block text-xs font-medium text-taupe">{label}</span>}
+          <input
+            id={inputId}
+            type={type}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            aria-invalid={!!error}
+            className={`w-full rounded-xl border bg-white px-4 py-2.5 text-sm outline-none transition placeholder:text-taupe/60 focus:border-ink ${error ? 'border-red-400' : 'border-sand'}`}
+          />
+          {error && <span className="mt-1 block text-xs text-red-500">{error}</span>}
+        </label>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return <div className={`overflow-hidden rounded-2xl bg-white shadow-sm ${className}`}>{children}</div>;
+    }
+
+    function Badge({ tone = 'dark', children }) {
+      const tones = { dark: 'bg-ink text-cream', rose: 'bg-rose text-white', light: 'bg-white/90 text-ink' };
+      return <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wider ${tones[tone]}`}>{children}</span>;
+    }
+
+    function Modal({ isOpen, onClose, title, size = 'md', children }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        window.addEventListener('keydown', onKey);
+        document.body.style.overflow = 'hidden';
+        return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = ''; };
+      }, [isOpen, onClose]);
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-4xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+          <div role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}
+            className={`fade-up max-h-[92vh] w-full overflow-y-auto rounded-t-3xl bg-cream sm:rounded-3xl ${sizes[size]}`}>
+            <div className="sticky top-0 z-10 flex items-center justify-between bg-cream/95 px-5 py-4 backdrop-blur">
+              <h2 className="text-base font-semibold">{title}</h2>
+              <button onClick={onClose} aria-label="닫기" className="rounded-full p-1.5 text-xl leading-none hover:bg-sand">×</button>
+            </div>
+            <div className="px-5 pb-6">{children}</div>
+          </div>
+        </div>
+      );
+    }
+
+    function ProductImage({ src, alt, className = '' }) {
+      const [failed, setFailed] = useState(false);
+      if (failed) {
+        return (
+          <div className={`flex items-center justify-center bg-gradient-to-br from-sand to-cream p-4 text-center ${className}`}>
+            <span className="font-serif text-lg text-taupe">{alt}</span>
+          </div>
+        );
+      }
+      return <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} className={`object-cover ${className}`} />;
+    }
+
+    function Stars({ rating }) {
+      return <span className="text-xs text-taupe" aria-label={`평점 ${rating}`}>★ {rating.toFixed(1)}</span>;
+    }
+
+    // ========================================
+    // 🔐 API Client (JWT 토큰)
+    // ========================================
+    // 로그인/가입 시 서버가 발급한 JWT 를 localStorage 에 보관하고,
+    // 이후 모든 요청에 Authorization: Bearer <token> 헤더로 붙인다.
+    const TOKEN_KEY = 'shop.token';
+    const tokenStore = {
+      get() { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } },
+      set(token) { try { localStorage.setItem(TOKEN_KEY, token); } catch {} },
+      clear() { try { localStorage.removeItem(TOKEN_KEY); } catch {} },
+    };
+
+    class ApiError extends Error {
+      constructor(status, message) { super(message); this.status = status; }
+    }
+
+    async function apiFetch(path, { method = 'GET', body } = {}) {
+      const headers = {};
+      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      const token = tokenStore.get();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      let res;
+      try {
+        res = await fetch(`${API_BASE_URL}${path}`, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
+      } catch {
+        throw new ApiError(0, '서버에 연결할 수 없어요');
+      }
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new ApiError(res.status, json.message || '요청을 처리하지 못했어요');
+      return json.data;
+    }
+
+    // ========================================
+    // 🛍️ Store Context (로그인 사용자·장바구니는 서버, 찜은 로컬 상태)
+    // ========================================
+    const StoreContext = createContext(null);
+    const useStore = () => useContext(StoreContext);
+
+    function StoreProvider({ children }) {
+      // user: undefined = 토큰 확인 중, null = 비로그인
+      const [user, setUser] = useState(() => (tokenStore.get() ? undefined : null));
+      const [cart, setCart] = useState(null);
+      const [cartLoading, setCartLoading] = useState(false);
+      const [busyId, setBusyId] = useState(null);
+      const [wish, setWish] = useState([]);
+      const [toast, setToast] = useState('');
+      const [auth, setAuth] = useState({ open: false, reason: '' });
+      const [cartOpen, setCartOpen] = useState(false);
+      const pendingAdd = useRef(null); // 로그인 후 이어서 담을 상품
+
+      const notify = useCallback((msg) => {
+        setToast(msg);
+        clearTimeout(window.__toastTimer);
+        window.__toastTimer = setTimeout(() => setToast(''), 1800);
+      }, []);
+
+      const resetSession = useCallback(() => {
+        tokenStore.clear();
+        setUser(null);
+        setCart(null);
+      }, []);
+
+      // 토큰이 만료·위조되었으면 로그아웃 처리하고 다시 로그인하게 한다
+      const handleError = useCallback((err) => {
+        if (err.status === 401) {
+          resetSession();
+          setCartOpen(false);
+          setAuth({ open: true, reason: err.message });
+        } else {
+          notify(err.message);
+        }
+      }, [resetSession, notify]);
+
+      const loadCart = useCallback(async () => {
+        setCartLoading(true);
+        try { setCart(await apiFetch('/cart')); }
+        catch (err) { handleError(err); }
+        finally { setCartLoading(false); }
+      }, [handleError]);
+
+      // 새로고침 시 저장된 토큰으로 로그인 상태 복원
+      useEffect(() => {
+        if (!tokenStore.get()) return;
+        apiFetch('/auth/me')
+          .then((u) => { setUser(u); loadCart(); })
+          .catch(() => resetSession());
+      }, [loadCart, resetSession]);
+
+      const openAuth = useCallback((reason = '') => setAuth({ open: true, reason }), []);
+      const closeAuth = useCallback(() => { setAuth({ open: false, reason: '' }); pendingAdd.current = null; }, []);
+
+      const addToCart = useCallback(async (product, color) => {
+        if (!user) {
+          pendingAdd.current = { product, color };
+          openAuth('장바구니를 사용하려면 로그인이 필요해요');
+          return;
+        }
+        setBusyId(`add-${product.id}`);
+        try {
+          setCart(await apiFetch('/cart', { method: 'POST', body: { productId: product.id, color: color ?? product.colors[0] } }));
+          notify('장바구니에 담았어요');
+        } catch (err) { handleError(err); }
+        finally { setBusyId(null); }
+      }, [user, openAuth, notify, handleError]);
+
+      // 로그인/가입 성공 → 토큰 저장, 장바구니 불러오기, 담으려던 상품 이어서 담기
+      const applyAuth = useCallback(async ({ token, user: u }, message) => {
+        tokenStore.set(token);
+        setUser(u);
+        setAuth({ open: false, reason: '' });
+        notify(message);
+        const pending = pendingAdd.current;
+        pendingAdd.current = null;
+        if (pending) {
+          try {
+            setCart(await apiFetch('/cart', { method: 'POST', body: { productId: pending.product.id, color: pending.color ?? pending.product.colors[0] } }));
+            notify(`${message} · 장바구니에 담았어요`);
+          } catch (err) { handleError(err); }
+        } else {
+          loadCart();
+        }
+      }, [notify, loadCart, handleError]);
+
+      const login = (email, password) => apiFetch('/auth/login', { method: 'POST', body: { email, password } }).then((d) => applyAuth(d, `${d.user.name}님, 반가워요`));
+      const signup = (email, name, password) => apiFetch('/auth/signup', { method: 'POST', body: { email, name, password } }).then((d) => applyAuth(d, '가입을 환영해요!'));
+      const logout = () => { resetSession(); setCartOpen(false); notify('로그아웃되었어요'); };
+
+      const updateQty = async (itemId, qty) => {
+        setBusyId(itemId);
+        try { setCart(await apiFetch(`/cart/${itemId}`, { method: 'PATCH', body: { qty } })); }
+        catch (err) { handleError(err); }
+        finally { setBusyId(null); }
+      };
+
+      const removeItem = async (itemId) => {
+        setBusyId(itemId);
+        try { setCart(await apiFetch(`/cart/${itemId}`, { method: 'DELETE' })); notify('장바구니에서 뺐어요'); }
+        catch (err) { handleError(err); }
+        finally { setBusyId(null); }
+      };
+
+      const openCart = () => {
+        if (!user) { openAuth('장바구니를 보려면 로그인이 필요해요'); return; }
+        setCartOpen(true);
+        loadCart();
+      };
+
+      const toggleWish = (id) => setWish((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+      const value = {
+        user, login, signup, logout, auth, openAuth, closeAuth,
+        cart, cartLoading, busyId, addToCart, updateQty, removeItem,
+        cartOpen, openCart, closeCart: useCallback(() => setCartOpen(false), []),
+        wish, toggleWish, notify,
+      };
+      return (
+        <StoreContext.Provider value={value}>
+          {children}
+          {toast && (
+            <div role="status" className="fade-up fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 whitespace-nowrap rounded-full bg-ink px-5 py-2.5 text-sm text-cream shadow-lg">
+              {toast}
+            </div>
+          )}
+        </StoreContext.Provider>
+      );
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Header({ search, onSearch }) {
+      const { cart, wish, user, logout, openAuth, openCart } = useStore();
+      const count = user && cart ? cart.count : 0;
+      return (
+        <header className="sticky top-0 z-40 border-b border-sand bg-cream/90 backdrop-blur">
+          <div className="bg-ink py-1.5 text-center text-[11px] tracking-wide text-cream">
+            신규 회원 첫 구매 15% 할인 · 5만원 이상 무료배송
+          </div>
+          <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 sm:gap-6">
+            <a href="#" className="shrink-0 font-serif text-2xl font-semibold tracking-wide">MAISON ÉTÉ</a>
+            <div className="relative hidden flex-1 sm:block">
+              <input
+                value={search}
+                onChange={(e) => onSearch(e.target.value)}
+                placeholder="블라우스, 코트, 로퍼..."
+                aria-label="상품 검색"
+                className="w-full rounded-full border border-sand bg-white px-4 py-2 text-sm outline-none focus:border-ink"
+              />
+            </div>
+            <nav className="ml-auto flex items-center gap-1 text-sm">
+              {user === undefined ? (
+                <span className="px-3 py-2 text-taupe">···</span>
+              ) : user ? (
+                <>
+                  <span className="hidden px-2 py-2 text-taupe md:inline">{user.name}님</span>
+                  <button onClick={logout} className="rounded-full px-3 py-2 hover:bg-sand/60">로그아웃</button>
+                </>
+              ) : (
+                <button onClick={() => openAuth()} className="rounded-full px-3 py-2 hover:bg-sand/60">로그인 · 회원가입</button>
+              )}
+              <span className="hidden rounded-full px-3 py-2 sm:inline" aria-label={`찜 ${wish.length}개`}>♡ {wish.length}</span>
+              <button onClick={openCart} className="relative rounded-full px-3 py-2 hover:bg-sand/60" aria-label={`장바구니 ${count}개`}>
+                장바구니
+                {count > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose px-1 text-[10px] font-bold text-white">{count}</span>
+                )}
+              </button>
+            </nav>
+          </div>
+          <div className="px-4 pb-3 sm:hidden">
+            <input
+              value={search}
+              onChange={(e) => onSearch(e.target.value)}
+              placeholder="상품 검색"
+              aria-label="상품 검색"
+              className="w-full rounded-full border border-sand bg-white px-4 py-2 text-sm outline-none focus:border-ink"
+            />
+          </div>
+        </header>
+      );
+    }
+
+    function Hero() {
+      return (
+        <section className="mx-auto max-w-6xl px-4 pt-8 sm:pt-12">
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-sand via-cream to-[#efe2d8] px-6 py-12 sm:px-12 sm:py-16">
+            <p className="text-xs font-medium tracking-[0.3em] text-taupe">2026 AUTUMN COLLECTION</p>
+            <h1 className="mt-3 font-serif text-4xl leading-tight sm:text-6xl">
+              Quietly Elegant,<br />Everyday You.
+            </h1>
+            <p className="mt-4 max-w-md text-sm leading-relaxed text-taupe">
+              출근부터 주말까지, 30대의 일상에 오래 머무는 옷.<br />
+              좋은 소재와 단정한 실루엣만 골랐어요.
+            </p>
+            <div className="pointer-events-none absolute -right-10 -top-10 h-56 w-56 rounded-full bg-rose/20 blur-3xl" />
+          </div>
+        </section>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="mt-20 border-t border-sand py-10 text-center text-xs text-taupe">
+          <p className="font-serif text-lg text-ink">MAISON ÉTÉ</p>
+          <p className="mt-2">본 사이트는 프로토타입이며 실제 판매·결제가 이루어지지 않습니다.</p>
+          <p className="mt-1">© 2026 MAISON ÉTÉ. All rights reserved.</p>
+        </footer>
+      );
+    }
+
+    // ========================================
+    // 🧾 Feature Components
+    // ========================================
+    function ProductCard({ product, onOpen, index }) {
+      const { wish, toggleWish, addToCart, busyId } = useStore();
+      const liked = wish.includes(product.id);
+      const rate = discountRate(product);
+      const adding = busyId === `add-${product.id}`;
+      return (
+        <article className="fade-up group flex flex-col" style={{ animationDelay: `${index * 40}ms` }}>
+          <Card className="relative">
+            <button onClick={() => onOpen(product)} className="block w-full text-left" aria-label={`${product.name} 상세 보기`}>
+              <ProductImage src={product.image} alt={product.name} className="aspect-[4/5] w-full transition duration-500 group-hover:scale-105" />
+            </button>
+            <div className="absolute left-3 top-3 flex gap-1">
+              {product.tags.map((t) => <Badge key={t} tone={t === 'BEST' ? 'dark' : 'light'}>{t}</Badge>)}
+            </div>
+            <button
+              onClick={() => toggleWish(product.id)}
+              aria-pressed={liked}
+              aria-label={liked ? '찜 해제' : '찜하기'}
+              className={`absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-lg shadow transition hover:scale-110 ${liked ? 'text-rose' : 'text-taupe'}`}
+            >
+              {liked ? '♥' : '♡'}
+            </button>
+          </Card>
+          <div className="mt-3 flex flex-1 flex-col px-1">
+            <p className="text-[11px] text-taupe">{product.category}</p>
+            <h3 className="mt-0.5 line-clamp-1 text-sm font-medium">{product.name}</h3>
+            <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-taupe">{product.desc}</p>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              {rate > 0 && <span className="text-sm font-bold text-rose">{rate}%</span>}
+              <span className="text-[15px] font-bold">{won(finalPrice(product))}</span>
+              {rate > 0 && <span className="text-xs text-taupe/70 line-through">{won(product.price)}</span>}
+            </div>
+            <div className="mt-1"><Stars rating={product.rating} /> <span className="text-[11px] text-taupe/70">리뷰 {product.reviews}</span></div>
+            <Button variant="secondary" size="sm" className="mt-3 w-full" disabled={adding}
+              onClick={() => addToCart(product)} aria-label={`${product.name} 장바구니 담기`}>
+              {adding ? '담는 중…' : '장바구니 담기'}
+            </Button>
+          </div>
+        </article>
+      );
+    }
+
+    function ProductDetail({ product, onClose }) {
+      const { addToCart, wish, toggleWish, user } = useStore();
+      const [color, setColor] = useState(product.colors[0]);
+      const liked = wish.includes(product.id);
+      const rate = discountRate(product);
+      return (
+        <div className="grid gap-6 sm:grid-cols-2">
+          <ProductImage src={product.image} alt={product.name} className="aspect-[4/5] w-full rounded-2xl" />
+          <div className="flex flex-col">
+            <p className="text-xs text-taupe">{product.category}</p>
+            <h3 className="mt-1 text-xl font-semibold">{product.name}</h3>
+            <div className="mt-1"><Stars rating={product.rating} /> <span className="text-xs text-taupe/70">리뷰 {product.reviews}개</span></div>
+            <div className="mt-4 flex items-baseline gap-2">
+              {rate > 0 && <span className="text-xl font-bold text-rose">{rate}%</span>}
+              <span className="text-2xl font-bold">{won(finalPrice(product))}</span>
+              {rate > 0 && <span className="text-sm text-taupe/70 line-through">{won(product.price)}</span>}
+            </div>
+            <p className="mt-4 text-sm leading-relaxed text-taupe">{product.desc}</p>
+            <fieldset className="mt-5">
+              <legend className="mb-2 text-xs font-medium text-taupe">색상</legend>
+              <div className="flex flex-wrap gap-2">
+                {product.colors.map((c) => (
+                  <button key={c} onClick={() => setColor(c)} aria-pressed={color === c}
+                    className={`rounded-full border px-3 py-1.5 text-xs transition ${color === c ? 'border-ink bg-ink text-cream' : 'border-sand bg-white hover:border-taupe'}`}>
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <ul className="mt-5 space-y-1 rounded-xl bg-white p-4 text-xs text-taupe">
+              <li>· 5만원 이상 무료배송 (제주·도서산간 추가)</li>
+              <li>· 오후 2시 이전 주문 시 당일 출고</li>
+              <li>· 수령 후 7일 이내 교환·반품 가능</li>
+            </ul>
+            <div className="mt-auto flex gap-2 pt-6">
+              <Button variant="secondary" onClick={() => toggleWish(product.id)} aria-pressed={liked} aria-label={liked ? '찜 해제' : '찜하기'} className="px-4">
+                <span className={liked ? 'text-rose' : ''}>{liked ? '♥' : '♡'}</span>
+              </Button>
+              <Button className="flex-1" size="lg" onClick={() => { onClose(); addToCart(product, color); }}>
+                {user ? '장바구니 담기' : '로그인하고 담기'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function CartDrawer() {
+      const { cart, cartLoading, cartOpen, closeCart, updateQty, removeItem, busyId, notify } = useStore();
+      useEffect(() => {
+        if (!cartOpen) return;
+        const onKey = (e) => e.key === 'Escape' && closeCart();
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [cartOpen, closeCart]);
+      if (!cartOpen) return null;
+      const items = cart?.items ?? [];
+      return (
+        <div className="fixed inset-0 z-50 bg-ink/40" onClick={closeCart}>
+          <aside role="dialog" aria-modal="true" aria-label="장바구니" onClick={(e) => e.stopPropagation()}
+            className="slide-in absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-cream">
+            <div className="flex items-center justify-between border-b border-sand px-5 py-4">
+              <h2 className="font-semibold">내 장바구니 {cart && <span className="text-sm font-normal text-taupe">({cart.count})</span>}</h2>
+              <button onClick={closeCart} aria-label="닫기" className="rounded-full p-1.5 text-xl leading-none hover:bg-sand">×</button>
+            </div>
+            {!cart && cartLoading ? (
+              <div className="flex flex-1 items-center justify-center text-sm text-taupe" aria-busy="true">불러오는 중…</div>
+            ) : items.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-taupe">
+                <span className="text-4xl">🛍️</span>
+                장바구니가 비어 있어요
+                <button onClick={closeCart} className="mt-2 underline">쇼핑 계속하기</button>
+              </div>
+            ) : (
+              <ul className="flex-1 space-y-5 overflow-y-auto p-5">
+                {items.map((i) => {
+                  const busy = busyId === i.id;
+                  return (
+                    <li key={i.id} className={`flex gap-3 transition ${busy ? 'opacity-50' : ''}`}>
+                      <ProductImage src={i.product.image} alt={i.product.name} className="h-28 w-[5.5rem] shrink-0 rounded-xl" />
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-medium leading-snug">{i.product.name}</p>
+                          <button onClick={() => removeItem(i.id)} disabled={busy} aria-label={`${i.product.name} 삭제`}
+                            className="shrink-0 rounded-full px-2 py-0.5 text-xs text-taupe hover:bg-sand hover:text-ink disabled:opacity-40">
+                            삭제
+                          </button>
+                        </div>
+                        <p className="mt-0.5 text-xs text-taupe">{i.color} · {won(i.unitPrice)}</p>
+                        <div className="mt-auto flex items-center justify-between pt-2">
+                          <div className="flex items-center rounded-full border border-sand bg-white">
+                            <button onClick={() => updateQty(i.id, i.qty - 1)} disabled={busy || i.qty <= 1} aria-label="수량 감소" className="px-3 py-1 disabled:opacity-30">−</button>
+                            <span className="w-7 text-center text-sm" aria-label={`수량 ${i.qty}개`}>{i.qty}</span>
+                            <button onClick={() => updateQty(i.id, i.qty + 1)} disabled={busy || i.qty >= 99} aria-label="수량 증가" className="px-3 py-1 disabled:opacity-30">+</button>
+                          </div>
+                          <span className="text-sm font-semibold">{won(i.lineTotal)}</span>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <div className="space-y-2 border-t border-sand p-5 text-sm">
+              <div className="flex justify-between"><span className="text-taupe">상품 금액</span><span>{won(cart?.subtotal ?? 0)}</span></div>
+              <div className="flex justify-between">
+                <span className="text-taupe">배송비</span>
+                <span>{cart?.shipping ? won(cart.shipping) : '무료'}</span>
+              </div>
+              {cart?.shipping > 0 && (
+                <p className="text-right text-[11px] text-rose">{won(50000 - cart.subtotal)} 더 담으면 무료배송</p>
+              )}
+              <div className="flex justify-between pt-2 text-base font-bold"><span>합계</span><span>{won(cart?.total ?? 0)}</span></div>
+              <Button size="lg" className="mt-3 w-full" disabled={items.length === 0}
+                onClick={() => notify('프로토타입에서는 결제 기능을 제공하지 않아요')}>
+                주문하기 (준비 중)
+              </Button>
+            </div>
+          </aside>
+        </div>
+      );
+    }
+
+    function AuthModal() {
+      const { auth, closeAuth, login, signup } = useStore();
+      const [mode, setMode] = useState('login');
+      const [form, setForm] = useState({ email: '', name: '', password: '', confirm: '' });
+      const [errors, setErrors] = useState({});
+      const [serverError, setServerError] = useState('');
+      const [submitting, setSubmitting] = useState(false);
+
+      // 모달이 열릴 때마다 초기화
+      useEffect(() => {
+        if (!auth.open) return;
+        setMode('login');
+        setForm({ email: '', name: '', password: '', confirm: '' });
+        setErrors({});
+        setServerError('');
+      }, [auth.open]);
+
+      const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+      const switchMode = (m) => { setMode(m); setErrors({}); setServerError(''); };
+
+      const submit = async (e) => {
+        e.preventDefault();
+        const next = {};
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) next.email = '이메일 형식을 확인해 주세요';
+        if (mode === 'signup') {
+          if (!form.name.trim()) next.name = '이름을 입력해 주세요';
+          else if (form.name.trim().length > 20) next.name = '이름은 20자 이하로 입력해 주세요';
+          if (form.password.length < 8 || form.password.length > 72) next.password = '비밀번호는 8~72자로 입력해 주세요';
+          if (form.confirm !== form.password) next.confirm = '비밀번호가 일치하지 않아요';
+        } else if (!form.password) {
+          next.password = '비밀번호를 입력해 주세요';
+        }
+        setErrors(next);
+        setServerError('');
+        if (Object.keys(next).length) return;
+        setSubmitting(true);
+        try {
+          if (mode === 'login') await login(form.email.trim(), form.password);
+          else await signup(form.email.trim(), form.name.trim(), form.password);
+        } catch (err) {
+          setServerError(err.message);
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      return (
+        <Modal isOpen={auth.open} onClose={closeAuth} title={mode === 'login' ? '로그인' : '회원가입'} size="sm">
+          <div role="tablist" aria-label="로그인 또는 회원가입" className="mb-4 grid grid-cols-2 rounded-full bg-sand/60 p-1 text-sm">
+            {[['login', '로그인'], ['signup', '회원가입']].map(([m, label]) => (
+              <button key={m} role="tab" aria-selected={mode === m} onClick={() => switchMode(m)}
+                className={`rounded-full py-2 transition ${mode === m ? 'bg-white font-medium shadow-sm' : 'text-taupe'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {auth.reason && <p className="mb-4 rounded-xl bg-rose/10 p-3 text-xs text-rose">{auth.reason}</p>}
+          <form onSubmit={submit} className="space-y-4" noValidate>
+            <Input id="auth-email" label="이메일" type="email" value={form.email} onChange={set('email')} placeholder="you@example.com" error={errors.email} />
+            {mode === 'signup' && (
+              <Input id="auth-name" label="이름" value={form.name} onChange={set('name')} placeholder="홍길동" error={errors.name} />
+            )}
+            <Input id="auth-password" label="비밀번호" type="password" value={form.password} onChange={set('password')}
+              placeholder={mode === 'signup' ? '8자 이상' : '••••••••'} error={errors.password} />
+            {mode === 'signup' && (
+              <Input id="auth-confirm" label="비밀번호 확인" type="password" value={form.confirm} onChange={set('confirm')} placeholder="한 번 더 입력" error={errors.confirm} />
+            )}
+            {serverError && <p role="alert" className="text-xs text-red-500">{serverError}</p>}
+            <button type="submit" disabled={submitting}
+              className="w-full rounded-full bg-ink py-3 text-sm font-medium text-cream hover:bg-black disabled:opacity-50">
+              {submitting ? '잠시만요…' : mode === 'login' ? '로그인' : '가입하기'}
+            </button>
+          </form>
+          {mode === 'login' && (
+            <p className="mt-4 text-center text-[11px] text-taupe">
+              체험용 계정: demo@maison.com / password123
+            </p>
+          )}
+        </Modal>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function ShopPage({ search }) {
+      const [category, setCategory] = useState('전체');
+      const [sort, setSort] = useState('recommend');
+      const [selected, setSelected] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      const [list, setList] = useState([]);
+      const [error, setError] = useState(null);
+      const [reloadKey, setReloadKey] = useState(0);
+
+      // 카테고리·정렬·검색어가 바뀌면 서버에 다시 요청 (검색어는 300ms 디바운스)
+      useEffect(() => {
+        const controller = new AbortController();
+        const params = new URLSearchParams({ category, sort });
+        if (search.trim()) params.set("q", search.trim());
+        setLoading(true);
+        setError(null);
+        const t = setTimeout(() => {
+          fetch(`${API_BASE_URL}/products?${params}`, { signal: controller.signal })
+            .then(async (res) => {
+              const body = await res.json().catch(() => ({}));
+              if (!res.ok || !body.success) throw new Error(body.message || "상품을 불러오지 못했어요");
+              setList(body.data);
+              setLoading(false);
+            })
+            .catch((err) => {
+              if (err.name === "AbortError") return;
+              setError(err.message);
+              setLoading(false);
+            });
+        }, search ? 300 : 0);
+        return () => { clearTimeout(t); controller.abort(); };
+      }, [category, sort, search, reloadKey]);
+
+      return (
+        <main className="mx-auto max-w-6xl px-4">
+          <Hero />
+
+          <section aria-labelledby="list-title" className="mt-10">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 id="list-title" className="font-serif text-3xl">Shop All</h2>
+                <p className="mt-1 text-xs text-taupe">총 {list.length}개 상품</p>
+              </div>
+              <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="정렬"
+                className="rounded-full border border-sand bg-white px-4 py-2 text-sm outline-none focus:border-ink">
+                {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+              </select>
+            </div>
+
+            <div role="tablist" aria-label="카테고리" className="-mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1">
+              {CATEGORIES.map((c) => (
+                <button key={c} role="tab" aria-selected={category === c} onClick={() => setCategory(c)}
+                  className={`shrink-0 rounded-full px-4 py-2 text-sm transition ${category === c ? 'bg-ink text-cream' : 'bg-white text-ink hover:bg-sand'}`}>
+                  {c}
+                </button>
+              ))}
+            </div>
+
+            {loading ? (
+              <div className="mt-6 grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-3 lg:grid-cols-4" aria-busy="true" aria-label="상품 불러오는 중">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="animate-pulse">
+                    <div className="aspect-[4/5] rounded-2xl bg-sand/70" />
+                    <div className="mt-3 h-3 w-1/3 rounded bg-sand/70" />
+                    <div className="mt-2 h-4 w-4/5 rounded bg-sand/70" />
+                    <div className="mt-2 h-4 w-1/2 rounded bg-sand/70" />
+                  </div>
+                ))}
+              </div>
+            ) : error ? (
+              <div role="alert" className="mt-10 rounded-3xl bg-white py-16 text-center text-sm text-taupe">
+                <p className="text-3xl">⚠️</p>
+                <p className="mt-2">{error}</p>
+                <p className="mt-1 text-xs">서버(node server.js)가 실행 중인지 확인해 주세요.</p>
+                <Button variant="secondary" size="sm" className="mt-4" onClick={() => setReloadKey((k) => k + 1)}>다시 시도</Button>
+              </div>
+            ) : list.length === 0 ? (
+              <div className="mt-10 rounded-3xl bg-white py-16 text-center text-sm text-taupe">
+                <p className="text-3xl">🔍</p>
+                <p className="mt-2">조건에 맞는 상품이 없어요.</p>
+                <button className="mt-4 underline" onClick={() => setCategory('전체')}>전체 상품 보기</button>
+              </div>
+            ) : (
+              <div className="mt-6 grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-3 lg:grid-cols-4">
+                {list.map((p, i) => <ProductCard key={p.id} product={p} index={i} onOpen={setSelected} />)}
+              </div>
+            )}
+          </section>
+
+          <Modal isOpen={!!selected} onClose={() => setSelected(null)} title="상품 상세" size="lg">
+            {selected && <ProductDetail product={selected} onClose={() => setSelected(null)} />}
+          </Modal>
+        </main>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      const [search, setSearch] = useState('');
+      return (
+        <StoreProvider>
+          <Header search={search} onSearch={setSearch} />
+          <ShopPage search={search} />
+          <Footer />
+          <CartDrawer />
+          <AuthModal />
+        </StoreProvider>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
