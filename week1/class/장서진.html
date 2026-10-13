@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>장서진 · Seojin Jang</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@300;400;500&display=swap">
+<style>
+  :root {
+    --bg: #f7f3ee;
+    --paper: #fffdfa;
+    --ink: #2a2522;
+    --muted: #7a6f68;
+    --line: #e6ddd3;
+    --accent: #b9775a;      /* warm terracotta */
+    --accent-soft: #f1e2d8;
+    --sage: #8a9a86;
+    --serif-en: "Cormorant Garamond", Georgia, serif;
+    --serif-ko: "Gowun Batang", "Nanum Myeongjo", serif;
+    --sans: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-weight: 300;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  img { display: block; max-width: 100%; }
+  a { color: inherit; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  /* Nav */
+  nav {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(247, 243, 238, .85);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  .logo { font-family: var(--serif-en); font-size: 22px; font-weight: 600; letter-spacing: .04em; text-decoration: none; }
+  .logo span { color: var(--accent); }
+  nav ul { display: flex; gap: 28px; list-style: none; margin: 0; padding: 0; font-size: 14px; }
+  nav ul a { text-decoration: none; color: var(--muted); transition: color .2s; }
+  nav ul a:hover { color: var(--accent); }
+
+  /* Hero */
+  .hero { padding: 72px 0 96px; }
+  .hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: 64px; align-items: center; }
+  .eyebrow {
+    font-family: var(--serif-en); font-style: italic; font-size: 20px;
+    color: var(--accent); margin: 0 0 12px;
+  }
+  .hero h1 {
+    font-family: var(--serif-ko); font-weight: 700;
+    font-size: clamp(48px, 7vw, 84px); line-height: 1.1; margin: 0;
+    letter-spacing: -.01em;
+  }
+  .hero h1 small {
+    display: block; font-family: var(--serif-en); font-weight: 500;
+    font-size: .38em; letter-spacing: .28em; color: var(--muted); margin-top: 14px;
+  }
+  .hero .lead { font-size: 18px; color: var(--muted); margin: 32px 0 36px; max-width: 30em; }
+  .hero .lead strong { color: var(--ink); font-weight: 500; }
+  .tags { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 40px; }
+  .tag {
+    font-size: 13px; padding: 7px 16px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--paper);
+  }
+  .btns { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 14px 28px; border-radius: 999px;
+    font-size: 14px; font-weight: 500; text-decoration: none; transition: transform .2s, background .2s;
+  }
+  .btn:hover { transform: translateY(-2px); }
+  .btn.primary { background: var(--ink); color: var(--paper); }
+  .btn.primary:hover { background: var(--accent); }
+  .btn.ghost { border: 1px solid var(--ink); }
+
+  .portrait { position: relative; }
+  .portrait::before {
+    content: ""; position: absolute; inset: 28px -28px -28px 28px;
+    border: 1px solid var(--accent); border-radius: 240px 240px 16px 16px;
+  }
+  .portrait img {
+    position: relative; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; object-position: center 20%;
+    border-radius: 240px 240px 16px 16px;
+    box-shadow: 0 30px 60px -20px rgba(80, 50, 30, .35);
+  }
+  .portrait .badge {
+    position: absolute; left: -24px; bottom: 48px;
+    background: var(--paper); padding: 16px 22px; border-radius: 14px;
+    box-shadow: 0 12px 30px -10px rgba(80, 50, 30, .25);
+    font-size: 13px; color: var(--muted);
+  }
+  .portrait .badge b { display: block; font-family: var(--serif-en); font-size: 26px; color: var(--accent); line-height: 1.1; font-weight: 600; }
+
+  /* Sections */
+  section { padding: 104px 0; }
+  .sec-head { text-align: center; margin-bottom: 64px; }
+  .sec-head .eyebrow { margin-bottom: 6px; }
+  .sec-head h2 { font-family: var(--serif-ko); font-size: clamp(28px, 4vw, 40px); margin: 0; font-weight: 700; }
+
+  /* About */
+  #about { background: var(--paper); }
+  .about-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: start; }
+  .about-quote {
+    font-family: var(--serif-ko); font-size: clamp(24px, 3vw, 32px); line-height: 1.55;
+    margin: 0; padding-left: 28px; border-left: 2px solid var(--accent);
+  }
+  .about-text p { margin: 0 0 20px; color: #4a423d; font-size: 16.5px; }
+  .about-text p:last-child { margin: 0; }
+
+  /* Roles */
+  .roles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+  .role {
+    background: var(--paper); border: 1px solid var(--line); border-radius: 20px;
+    padding: 36px 28px; transition: transform .3s, box-shadow .3s;
+  }
+  .role:hover { transform: translateY(-6px); box-shadow: 0 24px 40px -24px rgba(80, 50, 30, .35); }
+  .role .num { font-family: var(--serif-en); font-style: italic; color: var(--accent); font-size: 18px; }
+  .role h3 { font-family: var(--serif-ko); font-size: 22px; margin: 10px 0 4px; }
+  .role .en { font-family: var(--serif-en); font-size: 15px; color: var(--muted); letter-spacing: .08em; margin-bottom: 16px; }
+  .role p { font-size: 14.5px; color: #5b524c; margin: 0; }
+
+  /* Journey */
+  #journey { background: var(--accent-soft); }
+  .timeline { max-width: 720px; margin: 0 auto; position: relative; padding-left: 36px; }
+  .timeline::before { content: ""; position: absolute; left: 7px; top: 8px; bottom: 8px; width: 1px; background: var(--accent); opacity: .5; }
+  .step { position: relative; padding-bottom: 44px; }
+  .step:last-child { padding-bottom: 0; }
+  .step::before {
+    content: ""; position: absolute; left: -36px; top: 7px; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--bg); border: 2px solid var(--accent);
+  }
+  .step.now::before { background: var(--accent); box-shadow: 0 0 0 6px rgba(185, 119, 90, .2); }
+  .step .when { font-family: var(--serif-en); font-size: 15px; letter-spacing: .14em; color: var(--accent); text-transform: uppercase; }
+  .step h4 { font-family: var(--serif-ko); font-size: 21px; margin: 2px 0 6px; }
+  .step p { margin: 0; color: #5b524c; font-size: 15px; }
+
+  /* Philosophy */
+  .philo { text-align: center; }
+  .philo blockquote {
+    font-family: var(--serif-ko); font-size: clamp(26px, 4vw, 42px); line-height: 1.5;
+    margin: 0 auto; max-width: 18em;
+  }
+  .philo blockquote em { font-style: normal; color: var(--accent); }
+  .philo cite { display: block; margin-top: 24px; font-family: var(--serif-en); font-style: italic; font-size: 18px; color: var(--muted); }
+  .values { display: flex; justify-content: center; gap: 48px; margin-top: 64px; flex-wrap: wrap; }
+  .value { text-align: center; }
+  .value b { display: block; font-family: var(--serif-en); font-size: 30px; font-weight: 500; color: var(--ink); }
+  .value span { font-size: 14px; color: var(--muted); }
+
+  /* Contact */
+  #contact { background: var(--ink); color: var(--paper); text-align: center; }
+  #contact .eyebrow { color: #e0a98f; }
+  #contact h2 { font-family: var(--serif-ko); font-size: clamp(30px, 4.5vw, 46px); margin: 0 0 16px; }
+  #contact p { color: #c9bfb7; margin: 0 auto 40px; max-width: 32em; }
+  .socials { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+  .socials a {
+    text-decoration: none; padding: 14px 28px; border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, .25); font-size: 14px; transition: background .2s, color .2s;
+  }
+  .socials a:hover { background: var(--paper); color: var(--ink); }
+  footer { background: var(--ink); color: #8d837c; text-align: center; font-size: 12.5px; padding: 0 0 40px; letter-spacing: .06em; }
+
+  /* Reveal on scroll */
+  .reveal { opacity: 0; transform: translateY(24px); transition: opacity .9s ease, transform .9s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
+
+  /* Responsive */
+  @media (max-width: 960px) {
+    .roles { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 820px) {
+    nav ul { display: none; }
+    .hero { padding: 40px 0 72px; }
+    .hero .wrap { grid-template-columns: 1fr; gap: 56px; }
+    .portrait { order: -1; max-width: 420px; margin: 0 auto; width: calc(100% - 28px); }
+    .portrait .badge { left: -12px; }
+    .about-grid { grid-template-columns: 1fr; gap: 36px; }
+    section { padding: 80px 0; }
+  }
+  @media (max-width: 520px) {
+    .wrap { padding: 0 16px; }
+    .roles { grid-template-columns: 1fr; }
+    .values { gap: 32px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="logo" href="#top">Seojin<span>.</span></a>
+    <ul>
+      <li><a href="#about">About</a></li>
+      <li><a href="#roles">What I Do</a></li>
+      <li><a href="#journey">Journey</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ul>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <div class="reveal">
+      <p class="eyebrow">Move beautifully, live honestly.</p>
+      <h1>장서진<small>SEOJIN JANG</small></h1>
+      <p class="lead">
+        무대 위에서 몸으로 이야기하던 <strong>배우</strong>에서,<br>
+        이제는 매트 위에서 몸과 마음을 함께 깨우는 <strong>필라테스 강사</strong>이자
+        <strong>센터 대표</strong>, 그리고 매일의 움직임을 나누는 <strong>운동 크리에이터</strong>입니다.
+      </p>
+      <div class="tags">
+        <span class="tag">🎭 연기과 졸업</span>
+        <span class="tag">🧘‍♀️ 필라테스 강사</span>
+        <span class="tag">🏛️ 필라테스 센터 운영</span>
+        <span class="tag">💪 운동 인플루언서</span>
+        <span class="tag">🎬 틱톡커</span>
+      </div>
+      <div class="btns">
+        <a class="btn primary" href="#contact">함께 운동해요</a>
+        <a class="btn ghost" href="#about">더 알아보기</a>
+      </div>
+    </div>
+    <div class="portrait reveal">
+      <img src="seojin.jpg" alt="장서진 프로필 사진">
+      <div class="badge"><b>Since 1994</b>2월 21일생 · 물고기자리</div>
+    </div>
+  </div>
+</header>
+
+<section id="about">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">About me</p>
+      <h2>몸으로 표현하고, 몸으로 위로합니다</h2>
+    </div>
+    <div class="about-grid">
+      <p class="about-quote reveal">
+        “연기는 감정을 몸에 담는 일이었고,<br>필라테스는 그 몸을 돌보는 일이었어요.”
+      </p>
+      <div class="about-text reveal">
+        <p>
+          안녕하세요, 장서진입니다. 연기과에서 무대를 꿈꾸며 호흡과 발성, 자세 하나로 감정을 전하는 법을 배웠어요.
+          그 시간 동안 깨달은 건, 결국 모든 표현의 시작은 <b>건강하게 정렬된 몸</b>이라는 것이었습니다.
+        </p>
+        <p>
+          그렇게 만난 필라테스는 제 삶의 방향을 바꿔 놓았어요. 강사로서 수많은 회원님들의 변화를 곁에서 지켜보며,
+          지금은 직접 센터를 운영하면서 누구나 편안하게 자신의 몸과 대화할 수 있는 공간을 만들고 있습니다.
+        </p>
+        <p>
+          스튜디오 밖에서도 SNS와 틱톡을 통해 일상 속 운동 루틴과 즐거운 콘텐츠를 나누고 있어요.
+          운동이 숙제가 아니라 <b>하루 중 가장 기다려지는 시간</b>이 되도록 — 그게 제가 하는 모든 일의 이유예요.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="roles">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">What I do</p>
+      <h2>하나의 몸, 네 가지 이야기</h2>
+    </div>
+    <div class="roles">
+      <article class="role reveal">
+        <div class="num">01</div>
+        <h3>배우</h3>
+        <div class="en">ACTOR</div>
+        <p>연기과에서 다진 표현력과 무대 감각. 카메라 앞에서도, 회원님 앞에서도 진심을 전하는 힘이 됩니다.</p>
+      </article>
+      <article class="role reveal">
+        <div class="num">02</div>
+        <h3>필라테스 강사</h3>
+        <div class="en">INSTRUCTOR</div>
+        <p>체형과 컨디션에 맞춘 세심한 티칭으로, 바른 정렬과 코어의 힘을 차근차근 찾아갑니다.</p>
+      </article>
+      <article class="role reveal">
+        <div class="num">03</div>
+        <h3>센터 대표</h3>
+        <div class="en">STUDIO OWNER</div>
+        <p>운동이 즐거워지는 공간을 직접 만들고 운영합니다. 오래 머물고 싶은 따뜻한 스튜디오를 지향해요.</p>
+      </article>
+      <article class="role reveal">
+        <div class="num">04</div>
+        <h3>크리에이터</h3>
+        <div class="en">INFLUENCER · TIKTOKER</div>
+        <p>운동 루틴부터 유쾌한 일상까지. 틱톡과 SNS에서 더 많은 분들과 건강한 에너지를 나눕니다.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="journey">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Journey</p>
+      <h2>지금의 제가 되기까지</h2>
+    </div>
+    <div class="timeline">
+      <div class="step reveal">
+        <div class="when">1994 · 02 · 21</div>
+        <h4>장서진, 태어나다</h4>
+        <p>움직이는 걸 좋아하던 아이의 이야기가 시작됐어요.</p>
+      </div>
+      <div class="step reveal">
+        <div class="when">Stage</div>
+        <h4>연기과 졸업</h4>
+        <p>무대 위에서 몸과 호흡으로 감정을 표현하는 법을 배웠습니다.</p>
+      </div>
+      <div class="step reveal">
+        <div class="when">Turning point</div>
+        <h4>필라테스 강사로 새 출발</h4>
+        <p>몸을 이해하는 즐거움에 빠져, 누군가의 변화를 돕는 사람이 되었어요.</p>
+      </div>
+      <div class="step reveal">
+        <div class="when">Studio</div>
+        <h4>필라테스 센터 오픈 · 운영</h4>
+        <p>제가 꿈꾸던 운동 공간을 직접 만들어 회원님들과 함께 성장하고 있습니다.</p>
+      </div>
+      <div class="step now reveal">
+        <div class="when">Now</div>
+        <h4>운동 인플루언서 & 틱톡커</h4>
+        <p>스튜디오 밖에서도, 화면 너머의 더 많은 분들과 건강한 하루를 나누는 중이에요.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="philo">
+  <div class="wrap">
+    <blockquote class="reveal">
+      “가장 아름다운 몸은<br><em>잘 움직이는 몸</em>이라고 믿어요.”
+    </blockquote>
+    <cite class="reveal">— Seojin's philosophy</cite>
+    <div class="values reveal">
+      <div class="value"><b>Breathe</b><span>호흡으로 시작하기</span></div>
+      <div class="value"><b>Align</b><span>바르게 정렬하기</span></div>
+      <div class="value"><b>Enjoy</b><span>즐겁게 꾸준하기</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="contact">
+  <div class="wrap reveal">
+    <p class="eyebrow">Let's move together</p>
+    <h2>함께 움직여 볼까요?</h2>
+    <p>필라테스 레슨 문의, 브랜드 협업, 콘텐츠 제안 모두 환영해요. 편하게 연락 주세요!</p>
+    <div class="socials">
+      <a href="#" aria-label="TikTok">TikTok ↗</a>
+      <a href="#" aria-label="Instagram">Instagram ↗</a>
+      <a href="#" aria-label="필라테스 센터">Pilates Studio ↗</a>
+    </div>
+  </div>
+</section>
+<footer>© 2026 SEOJIN JANG · ALL RIGHTS RESERVED</footer>
+
+<script>
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((e) => {
+      if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+    });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+</script>
+</body>
+</html>

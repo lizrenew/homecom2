@@ -23,3 +23,6 @@ node_modules/
 # Playwright MCP logs (logged-in page snapshots)
 .playwright-mcp/
 week3/class/logs/
+
+# Large video files (GitHub 100MB limit)
+*.mp4
