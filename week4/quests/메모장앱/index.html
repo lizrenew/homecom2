@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>메모장</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN은 버전 고정. Babel 은 반드시 7.x (8.x 는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+    .toast-in { animation: toast-in .2s ease-out; }
+  </style>
+</head>
+<body class="bg-stone-100 text-stone-800">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks
+    // ========================================
+    const { useState, useEffect, useMemo, useCallback, useRef, forwardRef } = React;
+
+    const API_BASE_URL = '/api';
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-amber-500 text-white hover:bg-amber-600 focus-visible:ring-amber-400',
+        secondary: 'bg-white text-stone-700 border border-stone-300 hover:bg-stone-50 focus-visible:ring-stone-300',
+        danger: 'bg-red-500 text-white hover:bg-red-600 focus-visible:ring-red-400',
+        ghost: 'text-stone-600 hover:bg-stone-200 focus-visible:ring-stone-300',
+      };
+      const sizes = { sm: 'px-2.5 py-1 text-sm', md: 'px-4 py-2 text-sm', lg: 'px-5 py-2.5 text-base' };
+      return (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition focus:outline-none focus-visible:ring-2 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    const Input = forwardRef(function Input({ type = 'text', label, value, onChange, placeholder, error, disabled, className = '', ...rest }, ref) {
+      return (
+        <label className={`block ${className}`}>
+          {label && <span className="mb-1 block text-sm font-medium text-stone-600">{label}</span>}
+          <input
+            ref={ref}
+            type={type}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            aria-invalid={!!error}
+            className={`w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-amber-300 disabled:bg-stone-100 ${error ? 'border-red-400' : 'border-stone-300'}`}
+            {...rest}
+          />
+          {error && <span className="mt-1 block text-xs text-red-500">{error}</span>}
+        </label>
+      );
+    });
+
+    function Card({ className = '', children, ...rest }) {
+      return <div className={`rounded-2xl bg-white shadow-sm ring-1 ring-stone-200 ${className}`} {...rest}>{children}</div>;
+    }
+
+    function Modal({ isOpen, onClose, title, children, size = 'sm' }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [isOpen, onClose]);
+
+      if (!isOpen) return null;
+      const widths = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={title}
+            className={`w-full ${widths[size]} rounded-2xl bg-white p-6 shadow-xl`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {title && <h2 className="mb-3 text-lg font-semibold">{title}</h2>}
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    function Spinner({ className = '' }) {
+      return <div className={`h-6 w-6 animate-spin rounded-full border-2 border-stone-300 border-t-amber-500 ${className}`} role="status" aria-label="불러오는 중" />;
+    }
+
+    function Toast({ message, tone = 'info' }) {
+      if (!message) return null;
+      const tones = { info: 'bg-stone-800', error: 'bg-red-600' };
+      return (
+        <div role="status" className={`toast-in fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-sm text-white shadow-lg ${tones[tone]}`}>
+          {message}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🔌 API
+    // ========================================
+    async function api(path, options = {}) {
+      const res = await fetch(`${API_BASE_URL}${path}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+        body: options.body ? JSON.stringify(options.body) : undefined,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.message || '요청에 실패했어요');
+      return json.data;
+    }
+
+    function formatDate(iso) {
+      return new Date(iso).toLocaleString('ko-KR', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    // ========================================
+    // 🧩 Layout Components
+    // ========================================
+    function MemoList({ memos, selectedId, onSelect, query, onQueryChange, onNew, loading }) {
+      return (
+        <Card className="flex h-full flex-col overflow-hidden">
+          <div className="space-y-3 border-b border-stone-200 p-4">
+            <div className="flex items-center justify-between">
+              <h1 className="text-xl font-bold">📝 메모장</h1>
+              <Button size="sm" onClick={onNew}>+ 새 메모</Button>
+            </div>
+            <Input
+              type="search"
+              value={query}
+              onChange={(e) => onQueryChange(e.target.value)}
+              placeholder="제목·내용 검색"
+              aria-label="메모 검색"
+            />
+          </div>
+          <ul className="flex-1 overflow-y-auto" aria-label="메모 목록">
+            {loading ? (
+              <li className="flex justify-center py-10"><Spinner /></li>
+            ) : memos.length === 0 ? (
+              <li className="whitespace-pre-line px-4 py-10 text-center text-sm text-stone-400">
+                {query ? '검색 결과가 없어요' : '아직 메모가 없어요.\n새 메모를 작성해보세요!'}
+              </li>
+            ) : (
+              memos.map((m) => (
+                <li key={m.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(m.id)}
+                    aria-current={m.id === selectedId}
+                    className={`w-full border-b border-stone-100 px-4 py-3 text-left transition hover:bg-amber-50 ${m.id === selectedId ? 'bg-amber-100' : ''}`}
+                  >
+                    <div className="truncate font-medium">{m.title}</div>
+                    <div className="truncate text-sm text-stone-500">{m.content || '내용 없음'}</div>
+                    <div className="mt-1 text-xs text-stone-400">{formatDate(m.created_at)}</div>
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+          <div className="border-t border-stone-200 px-4 py-2 text-xs text-stone-400">총 {memos.length}개</div>
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function MemoEditor({ memo, onSave, onDelete, onBack, saving }) {
+      const [title, setTitle] = useState(memo?.title ?? '');
+      const [content, setContent] = useState(memo?.content ?? '');
+      const [error, setError] = useState('');
+      const titleRef = useRef(null);
+
+      useEffect(() => {
+        setTitle(memo?.title ?? '');
+        setContent(memo?.content ?? '');
+        setError('');
+        if (!memo) titleRef.current?.focus();
+      }, [memo]);
+
+      const dirty = title !== (memo?.title ?? '') || content !== (memo?.content ?? '');
+
+      const submit = () => {
+        if (!title.trim()) {
+          setError('제목을 입력해주세요');
+          titleRef.current?.focus();
+          return;
+        }
+        onSave({ title: title.trim(), content });
+      };
+
+      const onKeyDown = (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+          e.preventDefault();
+          if (dirty && !saving) submit();
+        }
+      };
+
+      return (
+        <Card className="flex h-full flex-col p-4 sm:p-6" onKeyDown={onKeyDown}>
+          <div className="mb-4 flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={onBack} className="md:hidden" aria-label="목록으로">← 목록</Button>
+            <span className="text-sm text-stone-400">
+              {memo ? `작성일 ${formatDate(memo.created_at)}` : '새 메모'}
+            </span>
+            <div className="ml-auto flex gap-2">
+              {memo && <Button variant="secondary" size="sm" onClick={onDelete} disabled={saving}>삭제</Button>}
+              <Button size="sm" onClick={submit} disabled={!dirty || saving}>
+                {saving ? '저장 중…' : '저장'}
+              </Button>
+            </div>
+          </div>
+          <div className="flex flex-1 flex-col gap-3">
+            <Input
+              ref={titleRef}
+              value={title}
+              onChange={(e) => { setTitle(e.target.value); setError(''); }}
+              placeholder="제목"
+              error={error}
+              maxLength={200}
+              aria-label="제목"
+            />
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="내용을 입력하세요… (Ctrl+S 로 저장)"
+              aria-label="내용"
+              className="min-h-[50vh] flex-1 resize-none rounded-lg border border-stone-300 bg-white p-3 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-amber-300 md:min-h-0"
+            />
+          </div>
+        </Card>
+      );
+    }
+
+    function EmptyEditor({ onNew }) {
+      return (
+        <Card className="flex h-full flex-col items-center justify-center gap-3 p-6 text-stone-400">
+          <div className="text-5xl">🗒️</div>
+          <p className="text-sm">왼쪽에서 메모를 선택하거나 새로 작성하세요</p>
+          <Button onClick={onNew}>+ 새 메모</Button>
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      const [memos, setMemos] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [loadError, setLoadError] = useState('');
+      const [selectedId, setSelectedId] = useState(null);
+      const [creating, setCreating] = useState(false);
+      const [query, setQuery] = useState('');
+      const [saving, setSaving] = useState(false);
+      const [confirmOpen, setConfirmOpen] = useState(false);
+      const [toast, setToast] = useState(null);
+
+      const showToast = useCallback((message, tone = 'info') => {
+        setToast({ message, tone });
+        setTimeout(() => setToast(null), 2200);
+      }, []);
+
+      const load = useCallback(async () => {
+        setLoading(true);
+        setLoadError('');
+        try {
+          setMemos(await api('/memos'));
+        } catch (e) {
+          setLoadError(e.message);
+        } finally {
+          setLoading(false);
+        }
+      }, []);
+
+      useEffect(() => { load(); }, [load]);
+
+      const filtered = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        if (!q) return memos;
+        return memos.filter((m) => m.title.toLowerCase().includes(q) || m.content.toLowerCase().includes(q));
+      }, [memos, query]);
+
+      const selected = memos.find((m) => m.id === selectedId) || null;
+      const editorOpen = creating || !!selected;
+
+      const startNew = () => { setSelectedId(null); setCreating(true); };
+      const select = (id) => { setCreating(false); setSelectedId(id); };
+      const closeEditor = () => { setCreating(false); setSelectedId(null); };
+
+      const save = async (payload) => {
+        setSaving(true);
+        try {
+          if (selected) {
+            const updated = await api(`/memos/${selected.id}`, { method: 'PUT', body: payload });
+            setMemos((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+          } else {
+            const created = await api('/memos', { method: 'POST', body: payload });
+            setMemos((prev) => [created, ...prev]);
+            setCreating(false);
+            setSelectedId(created.id);
+          }
+          showToast('저장했어요');
+        } catch (e) {
+          showToast(e.message, 'error');
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      const remove = async () => {
+        setConfirmOpen(false);
+        setSaving(true);
+        try {
+          await api(`/memos/${selected.id}`, { method: 'DELETE' });
+          setMemos((prev) => prev.filter((m) => m.id !== selected.id));
+          setSelectedId(null);
+          showToast('삭제했어요');
+        } catch (e) {
+          showToast(e.message, 'error');
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      return (
+        <main className="mx-auto grid h-screen max-w-6xl gap-4 p-3 sm:p-6 md:grid-cols-[320px_1fr]">
+          <section className={`min-h-0 ${editorOpen ? 'hidden md:block' : ''}`}>
+            {loadError ? (
+              <Card className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+                <p className="text-sm text-red-500">메모를 불러오지 못했어요<br />{loadError}</p>
+                <Button variant="secondary" onClick={load}>다시 시도</Button>
+              </Card>
+            ) : (
+              <MemoList
+                memos={filtered}
+                selectedId={selectedId}
+                onSelect={select}
+                query={query}
+                onQueryChange={setQuery}
+                onNew={startNew}
+                loading={loading}
+              />
+            )}
+          </section>
+          <section className={`min-h-0 ${editorOpen ? '' : 'hidden md:block'}`}>
+            {editorOpen ? (
+              <MemoEditor
+                memo={selected}
+                onSave={save}
+                onDelete={() => setConfirmOpen(true)}
+                onBack={closeEditor}
+                saving={saving}
+              />
+            ) : (
+              <EmptyEditor onNew={startNew} />
+            )}
+          </section>
+
+          <Modal isOpen={confirmOpen} onClose={() => setConfirmOpen(false)} title="메모 삭제">
+            <p className="mb-5 text-sm text-stone-600">
+              「{selected?.title}」 메모를 삭제할까요? 삭제한 메모는 되돌릴 수 없어요.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setConfirmOpen(false)}>취소</Button>
+              <Button variant="danger" onClick={remove}>삭제</Button>
+            </div>
+          </Modal>
+
+          <Toast message={toast?.message} tone={toast?.tone} />
+        </main>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
