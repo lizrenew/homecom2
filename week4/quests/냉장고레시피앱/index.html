@@ -70,18 +70,33 @@
     // 같은 서버(server.js)에서 index.html 과 /api 를 함께 서빙한다
     const API_BASE_URL = "/api";
 
+    // 🔑 JWT 는 localStorage 에 두고 모든 요청에 Authorization: Bearer 로 붙인다
+    const TOKEN_KEY = "fridge_token";
+    const tokenStore = {
+      get: () => { try { return localStorage.getItem(TOKEN_KEY); } catch (_) { return null; } },
+      set: (t) => { try { localStorage.setItem(TOKEN_KEY, t); } catch (_) {} },
+      clear: () => { try { localStorage.removeItem(TOKEN_KEY); } catch (_) {} },
+    };
+    // 401(토큰 없음·만료) 을 받으면 AuthProvider 가 로그아웃 처리한다
+    let onUnauthorized = () => {};
+
     async function api(endpoint, { method = "GET", body } = {}) {
+      const headers = {};
+      if (body) headers["Content-Type"] = "application/json";
+      const token = tokenStore.get();
+      if (token) headers.Authorization = `Bearer ${token}`;
       let res;
       try {
         res = await fetch(`${API_BASE_URL}${endpoint}`, {
           method,
-          headers: body ? { "Content-Type": "application/json" } : undefined,
+          headers,
           body: body ? JSON.stringify(body) : undefined,
         });
       } catch (_) {
         throw new Error("서버에 연결할 수 없어요");
       }
       const json = await res.json().catch(() => ({}));
+      if (res.status === 401 && !endpoint.startsWith("/auth/login")) onUnauthorized(json.message);
       if (!res.ok || !json.success) throw new Error(json.message || "요청을 처리하지 못했어요");
       return json.data;
     }
@@ -267,6 +282,115 @@
     }
 
     // ========================================
+    // 🔐 Auth State (Context)
+    // ========================================
+    const AuthContext = createContext(null);
+    const useAuth = () => useContext(AuthContext);
+
+    function AuthProvider({ children }) {
+      const [user, setUser] = useState(null);
+      // 저장된 토큰이 있으면 /auth/me 로 확인할 때까지 checking
+      const [status, setStatus] = useState(tokenStore.get() ? 'checking' : 'guest'); // checking | guest | authed
+      const [notice, setNotice] = useState('');
+
+      const logout = useCallback((message = '') => {
+        tokenStore.clear();
+        setUser(null);
+        setStatus('guest');
+        setNotice(message);
+        window.location.hash = '/';
+      }, []);
+
+      useEffect(() => {
+        onUnauthorized = (message) => logout(message || '다시 로그인해주세요');
+        return () => { onUnauthorized = () => {}; };
+      }, [logout]);
+
+      useEffect(() => {
+        if (status !== 'checking') return;
+        api('/auth/me')
+          .then((me) => { setUser(me); setStatus('authed'); })
+          .catch(() => setStatus('guest')); // 토큰 만료·네트워크 오류 모두 로그인 화면으로
+      }, []);
+
+      const finish = ({ token, user }) => {
+        tokenStore.set(token);
+        setUser(user);
+        setNotice('');
+        setStatus('authed');
+      };
+
+      const value = {
+        user, status, notice,
+        login: async (email, password) => finish(await api('/auth/login', { method: 'POST', body: { email, password } })),
+        signup: async (form) => finish(await api('/auth/signup', { method: 'POST', body: form })),
+        logout: () => logout(),
+      };
+      return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+    }
+
+    function AuthPage() {
+      const { login, signup, notice } = useAuth();
+      const [mode, setMode] = useState('login'); // login | signup
+      const [form, setForm] = useState({ email: '', password: '', password2: '', name: '' });
+      const [error, setError] = useState('');
+      const [loading, setLoading] = useState(false);
+      const set = (k) => (e) => { setForm({ ...form, [k]: e.target.value }); setError(''); };
+      const isSignup = mode === 'signup';
+
+      const submit = async (e) => {
+        e.preventDefault();
+        if (isSignup) {
+          if (!form.name.trim()) return setError('닉네임을 입력해주세요');
+          if (form.password.length < 8) return setError('비밀번호는 8자 이상이어야 해요');
+          if (form.password !== form.password2) return setError('비밀번호가 서로 달라요');
+        }
+        setLoading(true);
+        try {
+          if (isSignup) await signup({ email: form.email.trim(), password: form.password, name: form.name.trim() });
+          else await login(form.email.trim(), form.password);
+        } catch (err) {
+          setError(err.message);
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="flex min-h-screen items-center justify-center px-4 py-10">
+          <div className="w-full max-w-sm">
+            <div className="mb-6 text-center">
+              <span className="inline-grid h-14 w-14 place-items-center rounded-2xl bg-leaf-600 text-3xl">🥬</span>
+              <h1 className="mt-3 font-display text-3xl">냉장고 파먹기</h1>
+              <p className="mt-1 text-sm text-stone-500">{isSignup ? '가입하면 예시 재료가 담긴 내 냉장고가 생겨요' : '로그인하고 내 냉장고를 열어보세요'}</p>
+            </div>
+            <Card>
+              <div className="mb-5 grid grid-cols-2 gap-1 rounded-xl bg-stone-100 p-1" role="tablist">
+                {[['login', '로그인'], ['signup', '회원가입']].map(([m, label]) => (
+                  <button key={m} role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setError(''); }}
+                    className={`rounded-lg py-2 text-sm font-medium transition ${mode === m ? 'bg-white shadow-sm' : 'text-stone-500'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {notice && !error && <p className="mb-4 rounded-xl bg-yolk-50 px-3 py-2 text-sm text-yolk-600" role="status">{notice}</p>}
+              <form onSubmit={submit} className="space-y-3">
+                <Input label="이메일" id="auth-email" type="email" autoComplete="email" value={form.email} onChange={set('email')} required />
+                {isSignup && <Input label="닉네임" id="auth-name" maxLength={20} autoComplete="nickname" value={form.name} onChange={set('name')} />}
+                <Input label="비밀번호" id="auth-pw" type="password" maxLength={72} autoComplete={isSignup ? 'new-password' : 'current-password'}
+                  placeholder={isSignup ? '8자 이상' : ''} value={form.password} onChange={set('password')} required />
+                {isSignup && <Input label="비밀번호 확인" id="auth-pw2" type="password" maxLength={72} autoComplete="new-password" value={form.password2} onChange={set('password2')} />}
+                {error && <p className="rounded-xl bg-tomato-50 px-3 py-2 text-sm text-tomato-600" role="alert">{error}</p>}
+                <Button type="submit" size="lg" className="w-full" disabled={loading}>
+                  {loading ? '잠시만요…' : isSignup ? '가입하고 시작하기' : '로그인'}
+                </Button>
+              </form>
+            </Card>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
     // 🧠 App State (Context)
     // ========================================
     const AppContext = createContext(null);
@@ -388,6 +512,7 @@
 
     function Header() {
       const { path } = useRouter();
+      const { user, logout } = useAuth();
       return (
         <header className="sticky top-0 z-40 border-b border-stone-200/70 bg-cream/90 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
@@ -405,7 +530,9 @@
             </nav>
             <div className="flex items-center gap-2 text-sm text-stone-500">
               <span className="hidden sm:inline">{new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' })}</span>
-              <span className="grid h-9 w-9 place-items-center rounded-full bg-yolk-50 text-base" aria-label="프로필">🧑‍🍳</span>
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-yolk-50 text-base" aria-hidden="true">🧑‍🍳</span>
+              <span className="hidden max-w-[8rem] truncate font-medium text-ink sm:inline" title={user.email}>{user.name}님</span>
+              <Button variant="ghost" size="sm" onClick={logout}>로그아웃</Button>
             </div>
           </div>
         </header>
@@ -1028,6 +1155,29 @@
     }
 
     function App() {
+      return (
+        <AuthProvider>
+          <AuthGate />
+        </AuthProvider>
+      );
+    }
+
+    // 로그인 전에는 로그인/회원가입 화면만, 로그인하면 그 사용자의 데이터로 앱을 띄운다
+    function AuthGate() {
+      const { user, status } = useAuth();
+      if (status === 'checking') {
+        return (
+          <div className="flex min-h-screen items-center justify-center" role="status">
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-leaf-100 border-t-leaf-600" />
+          </div>
+        );
+      }
+      if (status !== 'authed') return <AuthPage />;
+      // key: 계정이 바뀌면 이전 사용자의 상태가 남지 않도록 통째로 새로 마운트
+      return <MainApp key={user.id} />;
+    }
+
+    function MainApp() {
       return (
         <Router>
           <AppProvider>
