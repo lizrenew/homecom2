@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>온기 커피</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #faf6f0;
+      --surface: #ffffff;
+      --text: #3b2f2a;
+      --muted: #8a7a70;
+      --accent: #b5643c;
+      --line: #eadfd3;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Noto Sans KR', sans-serif;
+      line-height: 1.7;
+      word-break: keep-all;
+    }
+    h1, h2, h3 { font-family: 'Gowun Batang', serif; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+
+    /* 상단 메뉴 */
+    header {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(250, 246, 240, 0.92);
+      backdrop-filter: blur(6px);
+      border-bottom: 1px solid var(--line);
+    }
+    header .wrap { display: flex; justify-content: space-between; align-items: center; height: 60px; }
+    .logo { font-family: 'Gowun Batang', serif; font-weight: 700; font-size: 1.25rem; color: var(--accent); text-decoration: none; }
+    nav a { margin-left: 20px; color: var(--text); text-decoration: none; font-size: 0.95rem; }
+    nav a:hover { color: var(--accent); }
+
+    /* 메인 배너 */
+    .hero { text-align: center; padding: 100px 0 80px; }
+    .hero p.small { color: var(--accent); letter-spacing: 0.2em; font-size: 0.85rem; }
+    .hero h1 { font-size: clamp(2.2rem, 6vw, 3.5rem); margin: 12px 0; }
+    .hero p.desc { color: var(--muted); }
+    .btn {
+      display: inline-block; margin-top: 28px; padding: 12px 28px;
+      background: var(--accent); color: #fff; border-radius: 999px;
+      text-decoration: none; font-weight: 500;
+    }
+    .btn:hover { opacity: 0.9; }
+
+    section { padding: 70px 0; border-top: 1px solid var(--line); }
+    section h2 { font-size: 1.9rem; text-align: center; margin-bottom: 36px; }
+
+    /* 소개 */
+    .about p { max-width: 600px; margin: 0 auto; text-align: center; color: var(--muted); }
+
+    /* 메뉴 */
+    .tabs { display: flex; justify-content: center; gap: 8px; margin-bottom: 28px; flex-wrap: wrap; }
+    .tabs button {
+      border: 1px solid var(--line); background: var(--surface); color: var(--text);
+      padding: 8px 18px; border-radius: 999px; cursor: pointer; font: inherit;
+    }
+    .tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+    .menu-item {
+      background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+      padding: 20px; display: flex; justify-content: space-between; gap: 12px;
+    }
+    .menu-item h3 { font-size: 1.1rem; }
+    .menu-item p { color: var(--muted); font-size: 0.9rem; }
+    .price { color: var(--accent); font-weight: 700; white-space: nowrap; }
+
+    /* 정보 */
+    .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    .info-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px; }
+    .info-card h3 { margin-bottom: 8px; color: var(--accent); }
+    .info-card ul { list-style: none; }
+    .info-card li { display: flex; justify-content: space-between; }
+    .open-badge { display: inline-block; margin-top: 12px; padding: 4px 12px; border-radius: 999px; font-size: 0.85rem; font-weight: 500; }
+    .open-badge.on { background: #e3f1e4; color: #2f6b35; }
+    .open-badge.off { background: #f3e3e0; color: #8b3a2e; }
+
+    footer { text-align: center; padding: 32px 0; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); }
+
+    @media (max-width: 560px) {
+      nav a { margin-left: 12px; font-size: 0.85rem; }
+      .hero { padding: 70px 0 60px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <a href="#" class="logo">온기 커피</a>
+      <nav>
+        <a href="#about">소개</a>
+        <a href="#menu">메뉴</a>
+        <a href="#info">오시는 길</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero wrap">
+      <p class="small">SINCE 2026</p>
+      <h1>따뜻한 한 잔의 쉼표</h1>
+      <p class="desc">매일 아침 직접 로스팅한 원두로 내리는 동네 작은 카페</p>
+      <a href="#menu" class="btn">메뉴 보기</a>
+    </div>
+
+    <section id="about">
+      <div class="wrap about">
+        <h2>우리 이야기</h2>
+        <p>
+          온기 커피는 골목 모퉁이의 작은 카페예요. 바쁜 하루 중 잠깐 쉬어갈 수 있도록
+          좋은 원두와 직접 구운 디저트를 준비합니다. 창가 자리에 앉아 천천히 머물다 가세요.
+        </p>
+      </div>
+    </section>
+
+    <section id="menu">
+      <div class="wrap">
+        <h2>메뉴</h2>
+        <div class="tabs" id="tabs"></div>
+        <div class="menu-grid" id="menu-grid"></div>
+      </div>
+    </section>
+
+    <section id="info">
+      <div class="wrap">
+        <h2>오시는 길</h2>
+        <div class="info-grid">
+          <div class="info-card">
+            <h3>영업시간</h3>
+            <ul>
+              <li><span>평일</span><span>08:00 – 21:00</span></li>
+              <li><span>주말</span><span>10:00 – 22:00</span></li>
+              <li><span>휴무</span><span>매주 월요일</span></li>
+            </ul>
+            <span class="open-badge" id="open-badge"></span>
+          </div>
+          <div class="info-card">
+            <h3>위치</h3>
+            <p>서울시 어딘가 골목길 12, 1층</p>
+            <p style="color: var(--muted)">지하철역에서 도보 5분</p>
+          </div>
+          <div class="info-card">
+            <h3>연락처</h3>
+            <p>02-000-0000</p>
+            <p style="color: var(--muted)">단체 주문은 하루 전 연락 주세요</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>© 2026 온기 커피. 이 페이지는 연습용 가상 카페입니다.</footer>
+
+  <script>
+    const MENU = {
+      '커피': [
+        { name: '아메리카노', desc: '고소한 하우스 블렌드', price: 4000 },
+        { name: '카페라떼', desc: '부드러운 우유와 에스프레소', price: 4500 },
+        { name: '바닐라 라떼', desc: '직접 만든 바닐라 시럽', price: 5000 },
+        { name: '핸드드립', desc: '오늘의 싱글 오리진', price: 6000 },
+      ],
+      '논커피': [
+        { name: '얼그레이 밀크티', desc: '진하게 우린 홍차', price: 5500 },
+        { name: '유자차', desc: '국산 유자청', price: 5000 },
+        { name: '초코 라떼', desc: '진한 다크 초콜릿', price: 5000 },
+      ],
+      '디저트': [
+        { name: '버터 스콘', desc: '매일 아침 굽는 스콘', price: 3500 },
+        { name: '바스크 치즈케이크', desc: '겉은 탄탄, 속은 촉촉', price: 6500 },
+        { name: '휘낭시에', desc: '고소한 태운 버터', price: 3000 },
+      ],
+    };
+
+    const tabsEl = document.getElementById('tabs');
+    const gridEl = document.getElementById('menu-grid');
+
+    function renderMenu(category) {
+      tabsEl.querySelectorAll('button').forEach((b) =>
+        b.classList.toggle('active', b.textContent === category)
+      );
+      gridEl.innerHTML = MENU[category]
+        .map(
+          (item) => `
+          <div class="menu-item">
+            <div>
+              <h3>${item.name}</h3>
+              <p>${item.desc}</p>
+            </div>
+            <span class="price">${item.price.toLocaleString()}원</span>
+          </div>`
+        )
+        .join('');
+    }
+
+    Object.keys(MENU).forEach((category) => {
+      const btn = document.createElement('button');
+      btn.textContent = category;
+      btn.addEventListener('click', () => renderMenu(category));
+      tabsEl.appendChild(btn);
+    });
+    renderMenu('커피');
+
+    // 현재 시간 기준으로 영업 중인지 표시
+    function updateOpenBadge() {
+      const now = new Date();
+      const day = now.getDay(); // 0=일, 1=월
+      const hour = now.getHours() + now.getMinutes() / 60;
+      const weekend = day === 0 || day === 6;
+      const [open, close] = weekend ? [10, 22] : [8, 21];
+      const isOpen = day !== 1 && hour >= open && hour < close;
+      const badge = document.getElementById('open-badge');
+      badge.textContent = isOpen ? '지금 영업 중' : '지금은 영업 종료';
+      badge.className = 'open-badge ' + (isOpen ? 'on' : 'off');
+    }
+    updateOpenBadge();
+  </script>
+</body>
+</html>

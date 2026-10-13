@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>간단 투두앱</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- 모든 CDN 버전 고정 (Babel 은 반드시 7.x) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+    .fade-in { animation: fadeIn .2s ease-out; }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-50 via-white to-sky-50 min-h-screen text-slate-800">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+    const API_BASE_URL = '/api';
+    const MAX_LEN = 200;
+
+    // API 헬퍼: { success, data, message } 형태를 해석
+    async function api(path, options = {}) {
+      let res;
+      try {
+        res = await fetch(`${API_BASE_URL}${path}`, {
+          headers: { 'Content-Type': 'application/json' },
+          ...options,
+        });
+      } catch (e) {
+        throw new Error('서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.');
+      }
+      let json = null;
+      try { json = await res.json(); } catch (e) { /* 본문 없음 */ }
+      if (!res.ok || !json || json.success === false) {
+        throw new Error((json && json.message) || `요청에 실패했어요. (${res.status})`);
+      }
+      return json.data;
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled = false, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-indigo-600 text-white hover:bg-indigo-700 focus-visible:ring-indigo-400',
+        secondary: 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 focus-visible:ring-slate-300',
+        danger: 'bg-rose-50 text-rose-600 hover:bg-rose-100 focus-visible:ring-rose-300',
+        ghost: 'bg-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-700 focus-visible:ring-slate-300',
+      };
+      const sizes = { sm: 'px-2.5 py-1 text-xs', md: 'px-4 py-2 text-sm', lg: 'px-5 py-3 text-base' };
+      return (
+        <button
+          disabled={disabled}
+          className={`inline-flex items-center justify-center gap-1 rounded-lg font-medium transition focus:outline-none focus-visible:ring-2 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    const Input = React.forwardRef(function Input({ label, error, className = '', id, ...rest }, ref) {
+      return (
+        <div className="w-full">
+          {label && <label htmlFor={id} className="sr-only">{label}</label>}
+          <input
+            ref={ref}
+            id={id}
+            className={`w-full rounded-lg border px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 transition ${error ? 'border-rose-300 focus:ring-rose-200' : 'border-slate-200 focus:ring-indigo-200 focus:border-indigo-400'} ${className}`}
+            aria-invalid={!!error}
+            {...rest}
+          />
+          {error && <p className="mt-1 text-xs text-rose-600" role="alert">{error}</p>}
+        </div>
+      );
+    });
+
+    function Card({ className = '', children }) {
+      return <div className={`bg-white rounded-2xl shadow-sm ring-1 ring-slate-100 ${className}`}>{children}</div>;
+    }
+
+    function Tabs({ tabs, value, onChange, className = '' }) {
+      return (
+        <div role="tablist" aria-label="필터" className={`inline-flex rounded-lg bg-slate-100 p-1 ${className}`}>
+          {tabs.map(t => (
+            <button
+              key={t.value}
+              role="tab"
+              aria-selected={value === t.value}
+              onClick={() => onChange(t.value)}
+              className={`px-3 py-1 text-sm rounded-md transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${value === t.value ? 'bg-white shadow-sm text-indigo-700 font-semibold' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              {t.label}{typeof t.count === 'number' && <span className="ml-1 text-xs opacity-70">{t.count}</span>}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function Spinner({ label = '불러오는 중...' }) {
+      return (
+        <div className="flex flex-col items-center justify-center py-12 text-slate-400" role="status">
+          <div className="h-8 w-8 rounded-full border-4 border-indigo-100 border-t-indigo-500 animate-spin" />
+          <span className="mt-3 text-sm">{label}</span>
+        </div>
+      );
+    }
+
+    function Alert({ children, onClose }) {
+      return (
+        <div role="alert" className="fade-in flex items-start justify-between gap-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-100">
+          <span>{children}</span>
+          {onClose && <button onClick={onClose} aria-label="알림 닫기" className="text-rose-400 hover:text-rose-600">✕</button>}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Header({ remaining }) {
+      return (
+        <header className="text-center mb-6">
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-indigo-700">간단 투두</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            {remaining > 0 ? <>남은 할 일 <strong className="text-indigo-600">{remaining}</strong>개</> : '남은 할 일이 없어요. 잘하셨어요!'}
+          </p>
+        </header>
+      );
+    }
+
+    function TodoItem({ todo, onToggle, onSave, onDelete, busy }) {
+      const [editing, setEditing] = useState(false);
+      const [draft, setDraft] = useState(todo.text);
+      const [err, setErr] = useState('');
+      const inputRef = useRef(null);
+
+      useEffect(() => { if (editing && inputRef.current) inputRef.current.focus(); }, [editing]);
+
+      const startEdit = () => { setDraft(todo.text); setErr(''); setEditing(true); };
+      const cancel = () => { setEditing(false); setErr(''); };
+      const save = async () => {
+        const text = draft.trim();
+        if (!text) return setErr('내용을 입력해 주세요.');
+        if (text.length > MAX_LEN) return setErr(`${MAX_LEN}자 이하로 입력해 주세요.`);
+        if (text === todo.text) return cancel();
+        const ok = await onSave(todo.id, text, setErr);
+        if (ok) setEditing(false);
+      };
+
+      return (
+        <li className="fade-in group flex items-start gap-3 px-4 py-3 border-b border-slate-100 last:border-b-0">
+          <input
+            type="checkbox"
+            checked={todo.done}
+            onChange={() => onToggle(todo)}
+            disabled={busy || editing}
+            aria-label={`${todo.text} 완료 표시`}
+            className="mt-1 h-5 w-5 shrink-0 cursor-pointer rounded accent-indigo-600"
+          />
+          <div className="flex-1 min-w-0">
+            {editing ? (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input
+                  ref={inputRef}
+                  value={draft}
+                  maxLength={MAX_LEN + 1}
+                  onChange={e => setDraft(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel(); }}
+                  error={err}
+                  label="할 일 수정"
+                  id={`edit-${todo.id}`}
+                />
+                <div className="flex gap-1 shrink-0">
+                  <Button size="sm" onClick={save} disabled={busy}>저장</Button>
+                  <Button size="sm" variant="secondary" onClick={cancel}>취소</Button>
+                </div>
+              </div>
+            ) : (
+              <p
+                onDoubleClick={startEdit}
+                title="더블클릭하여 수정"
+                className={`break-words cursor-text select-text ${todo.done ? 'line-through text-slate-400' : 'text-slate-700'}`}
+              >
+                {todo.text}
+              </p>
+            )}
+            {!editing && todo.createdAt && (
+              <p className="mt-0.5 text-xs text-slate-400">{new Date(todo.createdAt).toLocaleString('ko-KR')}</p>
+            )}
+          </div>
+          {!editing && (
+            <div className="flex gap-1 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100 transition">
+              <Button size="sm" variant="ghost" onClick={startEdit} disabled={busy} aria-label={`${todo.text} 수정`}>수정</Button>
+              <Button size="sm" variant="danger" onClick={() => onDelete(todo.id)} disabled={busy} aria-label={`${todo.text} 삭제`}>삭제</Button>
+            </div>
+          )}
+        </li>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function TodoPage() {
+      const [todos, setTodos] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [loadError, setLoadError] = useState('');
+      const [actionError, setActionError] = useState('');
+      const [text, setText] = useState('');
+      const [inputError, setInputError] = useState('');
+      const [adding, setAdding] = useState(false);
+      const [busyIds, setBusyIds] = useState({});
+      const [filter, setFilter] = useState('all');
+      const [clearing, setClearing] = useState(false);
+
+      const setBusy = (id, v) => setBusyIds(prev => ({ ...prev, [id]: v }));
+
+      const load = useCallback(async () => {
+        setLoading(true); setLoadError('');
+        try {
+          const data = await api('/todos');
+          setTodos(Array.isArray(data) ? data : []);
+        } catch (e) {
+          setLoadError(e.message);
+        } finally {
+          setLoading(false);
+        }
+      }, []);
+
+      useEffect(() => { load(); }, [load]);
+
+      const addTodo = async (e) => {
+        e.preventDefault();
+        const value = text.trim();
+        if (!value) return setInputError('할 일을 입력해 주세요.');
+        if (value.length > MAX_LEN) return setInputError(`${MAX_LEN}자 이하로 입력해 주세요.`);
+        setAdding(true); setInputError('');
+        try {
+          const created = await api('/todos', { method: 'POST', body: JSON.stringify({ text: value }) });
+          setTodos(prev => [created, ...prev]);
+          setText('');
+        } catch (err) {
+          setInputError(err.message);
+        } finally {
+          setAdding(false);
+        }
+      };
+
+      const toggleTodo = async (todo) => {
+        setBusy(todo.id, true); setActionError('');
+        setTodos(prev => prev.map(t => t.id === todo.id ? { ...t, done: !t.done } : t)); // 낙관적 업데이트
+        try {
+          const updated = await api(`/todos/${encodeURIComponent(todo.id)}`, { method: 'PATCH', body: JSON.stringify({ done: !todo.done }) });
+          setTodos(prev => prev.map(t => t.id === todo.id ? updated : t));
+        } catch (err) {
+          setTodos(prev => prev.map(t => t.id === todo.id ? todo : t));
+          setActionError(err.message);
+        } finally {
+          setBusy(todo.id, false);
+        }
+      };
+
+      const saveTodo = async (id, newText, setErr) => {
+        setBusy(id, true);
+        try {
+          const updated = await api(`/todos/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ text: newText }) });
+          setTodos(prev => prev.map(t => t.id === id ? updated : t));
+          return true;
+        } catch (err) {
+          setErr(err.message);
+          return false;
+        } finally {
+          setBusy(id, false);
+        }
+      };
+
+      const deleteTodo = async (id) => {
+        setBusy(id, true); setActionError('');
+        try {
+          await api(`/todos/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          setTodos(prev => prev.filter(t => t.id !== id));
+        } catch (err) {
+          setActionError(err.message);
+          setBusy(id, false);
+        }
+      };
+
+      const clearDone = async () => {
+        if (!window.confirm('완료된 항목을 모두 삭제할까요?')) return;
+        setClearing(true); setActionError('');
+        try {
+          await api('/todos?done=true', { method: 'DELETE' });
+          setTodos(prev => prev.filter(t => !t.done));
+        } catch (err) {
+          setActionError(err.message);
+        } finally {
+          setClearing(false);
+        }
+      };
+
+      const remaining = useMemo(() => todos.filter(t => !t.done).length, [todos]);
+      const doneCount = todos.length - remaining;
+      const visible = useMemo(() => todos.filter(t => filter === 'all' ? true : filter === 'active' ? !t.done : t.done), [todos, filter]);
+
+      const emptyMessage = filter === 'active' ? '진행 중인 할 일이 없어요.' : filter === 'done' ? '아직 완료한 할 일이 없어요.' : '할 일이 없어요. 첫 할 일을 추가해 보세요!';
+
+      return (
+        <main className="mx-auto w-full max-w-xl px-4 py-10 sm:py-16">
+          <Header remaining={remaining} />
+
+          <Card className="p-4 mb-4">
+            <form onSubmit={addTodo} className="flex flex-col sm:flex-row gap-2" noValidate>
+              <Input
+                id="new-todo"
+                label="새 할 일"
+                placeholder="무엇을 해야 하나요?"
+                value={text}
+                onChange={e => { setText(e.target.value); if (inputError) setInputError(''); }}
+                error={inputError}
+                disabled={adding}
+                autoFocus
+              />
+              <Button type="submit" disabled={adding} className="sm:self-start shrink-0">
+                {adding ? '추가 중...' : '추가'}
+              </Button>
+            </form>
+            <p className={`mt-1 text-right text-xs ${text.trim().length > MAX_LEN ? 'text-rose-500' : 'text-slate-400'}`}>
+              {text.trim().length}/{MAX_LEN}
+            </p>
+          </Card>
+
+          {actionError && <div className="mb-3"><Alert onClose={() => setActionError('')}>{actionError}</Alert></div>}
+
+          <Card className="overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
+              <Tabs
+                value={filter}
+                onChange={setFilter}
+                tabs={[
+                  { value: 'all', label: '전체', count: todos.length },
+                  { value: 'active', label: '진행중', count: remaining },
+                  { value: 'done', label: '완료', count: doneCount },
+                ]}
+              />
+              <span className="text-xs text-slate-500" aria-live="polite">남은 할 일 {remaining}개</span>
+            </div>
+
+            {loading ? (
+              <Spinner />
+            ) : loadError ? (
+              <div className="p-6 text-center">
+                <p className="text-sm text-rose-600 mb-3" role="alert">{loadError}</p>
+                <Button variant="secondary" onClick={load}>다시 시도</Button>
+              </div>
+            ) : visible.length === 0 ? (
+              <div className="py-12 text-center text-slate-400">
+                <div className="text-4xl mb-2" aria-hidden="true">📝</div>
+                <p className="text-sm">{emptyMessage}</p>
+              </div>
+            ) : (
+              <ul aria-label="할 일 목록">
+                {visible.map(todo => (
+                  <TodoItem
+                    key={todo.id}
+                    todo={todo}
+                    busy={!!busyIds[todo.id]}
+                    onToggle={toggleTodo}
+                    onSave={saveTodo}
+                    onDelete={deleteTodo}
+                  />
+                ))}
+              </ul>
+            )}
+
+            {!loading && !loadError && todos.length > 0 && (
+              <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-t border-slate-100">
+                <span className="text-xs text-slate-500">완료 {doneCount}개</span>
+                <Button size="sm" variant="danger" onClick={clearDone} disabled={doneCount === 0 || clearing}>
+                  {clearing ? '삭제 중...' : '완료 항목 삭제'}
+                </Button>
+              </div>
+            )}
+          </Card>
+
+          <p className="mt-4 text-center text-xs text-slate-400">항목을 더블클릭하면 바로 수정할 수 있어요 · Enter 저장 · Esc 취소</p>
+        </main>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return <TodoPage />;
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
