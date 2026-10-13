@@ -14,6 +14,8 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
   max: 5,
 });
+// 풀러가 유휴 연결을 끊을 때 발생하는 에러로 프로세스가 죽지 않도록 처리
+pool.on('error', (err) => console.error('[pg pool]', err.message));
 
 let dbInitialized = false;
 async function initDB() {
