@@ -1,0 +1,8 @@
+우리 커뮤니티 (week5 커뮤니티 게시판)
+
+배포 URL (Vercel): https://homecom-community.vercel.app
+
+테스트 계정
+- 아이디: minji
+- 비밀번호: password123
+(seojun, jiwoo, hayun, dohyun 도 비밀번호 동일)
