@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>마음 우체통</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Gowun+Dodum&family=Nanum+Pen+Script&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script>
+    // 따뜻한 편지지 팔레트 — 색은 CSS 변수(역할)로 두고 다크 모드(밤의 촛불)에서 값만 바꾼다
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            paper:  'rgb(var(--paper) / <alpha-value>)',
+            sheet:  'rgb(var(--sheet) / <alpha-value>)',
+            ink:    'rgb(var(--ink) / <alpha-value>)',
+            muted:  'rgb(var(--muted) / <alpha-value>)',
+            line:   'rgb(var(--line) / <alpha-value>)',
+            ember:  'rgb(var(--ember) / <alpha-value>)',
+            blush:  'rgb(var(--blush) / <alpha-value>)',
+            clay:   'rgb(var(--clay) / <alpha-value>)',
+            claybg: 'rgb(var(--claybg) / <alpha-value>)',
+            honey:  'rgb(var(--honey) / <alpha-value>)',
+            honeybg:'rgb(var(--honeybg) / <alpha-value>)',
+            heart:  'rgb(var(--heart) / <alpha-value>)',
+          },
+          fontFamily: {
+            sans: ['"Gowun Dodum"', 'system-ui', '"Apple SD Gothic Neo"', '"Malgun Gothic"', 'sans-serif'],
+            letter: ['"Gowun Batang"', 'serif'],
+            pen: ['"Nanum Pen Script"', 'cursive'],
+          },
+        },
+      },
+    };
+  </script>
+  <!-- ⚠️ 모든 CDN은 버전을 고정한다. Babel 은 반드시 7.x (8.x는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    :root {
+      --paper: 252 245 235;   /* 크림색 배경 */
+      --sheet: 255 252 246;   /* 편지지 */
+      --ink: 74 52 40;        /* 갈색 잉크 */
+      --muted: 150 124 104;
+      --line: 236 220 200;    /* 편지지 줄 */
+      --ember: 214 112 72;    /* 노을 테라코타 */
+      --blush: 251 228 212;
+      --clay: 160 88 58;      --claybg: 248 226 212;   /* 고민 */
+      --honey: 140 100 20;    --honeybg: 252 236 190;  /* 칭찬 */
+      --heart: 222 88 110;
+      --glow-a: 255 200 150;
+      --glow-b: 255 225 170;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper: 30 22 18;
+        --sheet: 44 33 27;
+        --ink: 245 232 216;
+        --muted: 184 158 136;
+        --line: 70 54 44;
+        --ember: 240 150 105;
+        --blush: 74 46 34;
+        --clay: 240 170 135;    --claybg: 84 50 38;
+        --honey: 240 200 120;   --honeybg: 80 62 30;
+        --heart: 240 120 140;
+        --glow-a: 140 70 30;
+        --glow-b: 120 80 30;
+      }
+    }
+    body {
+      background:
+        radial-gradient(60rem 30rem at 10% -10%, rgb(var(--glow-a) / .35), transparent 60%),
+        radial-gradient(50rem 30rem at 100% 0%, rgb(var(--glow-b) / .35), transparent 60%),
+        rgb(var(--paper));
+      background-repeat: no-repeat;
+      min-height: 100vh;
+    }
+    /* 편지지 줄무늬 — line-height 와 줄 간격을 맞춘다 */
+    .lined {
+      line-height: 2rem;
+      background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(2rem - 1px), rgb(var(--line)) calc(2rem - 1px), rgb(var(--line)) 2rem);
+      background-attachment: local;
+      background-position: 0 .75rem;
+    }
+    /* 우표 테두리 */
+    .stamp { outline: 2px dashed currentColor; outline-offset: 2px; }
+    @keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.4) rotate(-8deg); } 100% { transform: scale(1); } }
+    .pop { animation: pop .4s ease-out; }
+    @keyframes floatup { 0% { opacity: 0; transform: translateY(0) scale(.6); } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(-36px) scale(1.1); } }
+    .floatup { animation: floatup .9s ease-out forwards; }
+    @keyframes fadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .fadein { animation: fadein .4s ease-out both; }
+    @keyframes flicker { 0%, 100% { transform: rotate(-3deg) scale(1); } 50% { transform: rotate(3deg) scale(1.05); } }
+    .flicker { animation: flicker 3s ease-in-out infinite; display: inline-block; }
+    @media (prefers-reduced-motion: reduce) { .pop, .fadein, .floatup, .flicker { animation: none; } }
+  </style>
+</head>
+<body class="text-ink font-sans antialiased">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useMemo } = React;
+
+    // ========================================
+    // ⚙️ Config & Helpers
+    // ========================================
+    const API_BASE_URL = '/api';
+    const CONTENT_MAX = 1000;
+    const LIKED_KEY = 'anon-board:liked';
+
+    const CATEGORY = {
+      worry:  { label: '고민', emoji: '🕯️', badge: 'bg-claybg text-clay', stripe: 'bg-clay/60', placeholder: '마음에 담아둔 고민을 천천히 적어보세요.\n누가 썼는지는 아무도 몰라요.' },
+      praise: { label: '칭찬', emoji: '🌼', badge: 'bg-honeybg text-honey', stripe: 'bg-honey/50', placeholder: '나에게, 혹은 누군가에게 건네고 싶은\n따뜻한 칭찬을 적어보세요.' },
+    };
+
+    // 글 번호로 고정된 서명 — 같은 글은 항상 같은 이름으로 보인다
+    const SIGNS = ['지나가던 별이', '따뜻한 이웃이', '조용한 누군가가', '창가의 고양이가', '노을 아래에서', '마음 한 켠에서', '이름 모를 친구가'];
+    const signOf = (id) => SIGNS[id % SIGNS.length];
+
+    async function api(endpoint, options = {}) {
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.message || '요청에 실패했어요');
+      return json.data;
+    }
+
+    // 공감한 글 번호는 이 브라우저에만 기억한다 (같은 글에 반복 공감 방지)
+    function loadLiked() {
+      try { return new Set(JSON.parse(localStorage.getItem(LIKED_KEY) || '[]')); } catch { return new Set(); }
+    }
+    function saveLiked(set) {
+      try { localStorage.setItem(LIKED_KEY, JSON.stringify([...set])); } catch {}
+    }
+
+    function timeAgo(iso) {
+      const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+      if (diff < 60) return '방금 전';
+      if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
+      if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}일 전`;
+      return new Date(iso).toLocaleDateString('ko-KR');
+    }
+
+    function greeting() {
+      const h = new Date().getHours();
+      if (h < 6) return '늦은 밤까지 애쓰고 있군요';
+      if (h < 12) return '좋은 아침이에요, 오늘도 잘 부탁해요';
+      if (h < 18) return '오늘 하루도 잘 버티고 있어요';
+      return '오늘 하루도 정말 수고 많았어요';
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, type = 'button', className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-ember text-white shadow-md shadow-ember/25 hover:brightness-105 hover:-translate-y-px dark:text-paper',
+        secondary: 'bg-sheet text-ink ring-1 ring-line hover:bg-blush/60',
+        danger: 'bg-red-600 text-white hover:bg-red-500',
+        ghost: 'text-muted hover:bg-blush/60 hover:text-ink',
+      };
+      const sizes = { sm: 'px-3 py-1.5 text-sm', md: 'px-5 py-2 text-sm', lg: 'px-6 py-2.5 text-base' };
+      return (
+        <button
+          type={type}
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-1.5 rounded-full font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ember focus-visible:ring-offset-2 focus-visible:ring-offset-paper disabled:opacity-40 disabled:shadow-none disabled:translate-y-0 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    // 편지지 줄무늬가 있는 Textarea
+    function Textarea({ label, value, onChange, placeholder, error, disabled, maxLength, rows = 5, id, className = '' }) {
+      return (
+        <div className={className}>
+          {label && <label htmlFor={id} className="sr-only">{label}</label>}
+          <textarea
+            id={id}
+            rows={rows}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            maxLength={maxLength}
+            aria-invalid={!!error}
+            aria-describedby={error ? `${id}-error` : undefined}
+            className="lined w-full resize-y bg-transparent px-1 py-3 font-letter text-[16px] text-ink placeholder:text-muted/70 focus:outline-none"
+          />
+          {error && <p id={`${id}-error`} role="alert" className="mt-1.5 text-sm text-heart">{error}</p>}
+        </div>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return (
+        <div className={`relative rounded-3xl bg-sheet p-6 shadow-[0_2px_0_rgb(var(--line)),0_12px_30px_-12px_rgb(var(--ember)/.25)] ring-1 ring-line/70 ${className}`}>
+          {children}
+        </div>
+      );
+    }
+
+    function Badge({ className = '', children }) {
+      return <span className={`stamp inline-flex items-center gap-1 rounded-md px-2.5 py-0.5 text-xs font-bold tracking-wide ${className}`}>{children}</span>;
+    }
+
+    // 단일 선택 칩 그룹 (radiogroup)
+    function SegmentedControl({ label, options, value, onChange, className = '' }) {
+      return (
+        <div role="radiogroup" aria-label={label} className={`inline-flex flex-wrap rounded-full bg-blush/60 p-1 ${className}`}>
+          {options.map((o) => {
+            const active = o.value === value;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => onChange(o.value)}
+                className={`rounded-full px-3.5 py-1.5 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ember ${active ? 'bg-sheet font-bold text-ink shadow-sm' : 'text-muted hover:text-ink'}`}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function Spinner({ className = '' }) {
+      return <span aria-hidden="true" className={`flicker text-3xl ${className}`}>🕯️</span>;
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Header() {
+      return (
+        <header className="pt-12 pb-8 text-center">
+          <p className="text-5xl" aria-hidden="true"><span className="flicker">💌</span></p>
+          <h1 className="mt-3 font-letter text-3xl font-bold tracking-tight sm:text-4xl">마음 우체통</h1>
+          <p className="mt-2 font-pen text-2xl text-ember">{greeting()}</p>
+          <p className="mt-3 text-sm leading-relaxed text-muted">
+            이름 없이 고민을 털어놓고, 칭찬을 건네는 작은 우체통이에요.<br className="hidden sm:inline" />
+            {' '}마음이 닿는 편지에 공감을 눌러주세요.
+          </p>
+        </header>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="py-12 text-center">
+          <p className="font-pen text-xl text-muted">당신의 이야기는 이름 없이, 온기만 남아요</p>
+          <p className="mt-1 text-xs text-muted/70">작성자 정보는 저장하지 않아요 · 공감 기록은 이 브라우저에만 남아요</p>
+        </footer>
+      );
+    }
+
+    // ========================================
+    // 📝 Feature Components
+    // ========================================
+    function WriteForm({ onCreated }) {
+      const [category, setCategory] = useState('worry');
+      const [content, setContent] = useState('');
+      const [error, setError] = useState('');
+      const [submitting, setSubmitting] = useState(false);
+
+      const submit = async (e) => {
+        e.preventDefault();
+        if (!content.trim()) return setError('내용을 입력해주세요');
+        setSubmitting(true);
+        setError('');
+        try {
+          const post = await api('/posts', { method: 'POST', body: JSON.stringify({ category, content }) });
+          setContent('');
+          onCreated(post);
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      return (
+        <Card>
+          <form onSubmit={submit} aria-label="익명 편지 쓰기">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <SegmentedControl
+                label="편지 종류"
+                value={category}
+                onChange={setCategory}
+                options={Object.entries(CATEGORY).map(([value, c]) => ({ value, label: `${c.emoji} ${c.label}` }))}
+              />
+              <span className="font-pen text-lg text-muted">익명으로 부쳐져요 ✉️</span>
+            </div>
+            <Textarea
+              id="content"
+              label="편지 내용"
+              value={content}
+              onChange={(e) => { setContent(e.target.value); if (error) setError(''); }}
+              placeholder={CATEGORY[category].placeholder}
+              maxLength={CONTENT_MAX}
+              disabled={submitting}
+              error={error}
+            />
+            <div className="mt-3 flex items-center justify-between">
+              <span className={`text-xs tabular-nums ${content.length >= CONTENT_MAX ? 'text-heart' : 'text-muted'}`}>
+                {content.length} / {CONTENT_MAX}
+              </span>
+              <Button type="submit" disabled={submitting || !content.trim()}>
+                {submitting ? '우체통에 넣는 중…' : '💌 마음 보내기'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      );
+    }
+
+    function PostCard({ post, liked, onLike, index }) {
+      const c = CATEGORY[post.category];
+      const [popping, setPopping] = useState(false);
+
+      const click = () => {
+        if (liked) return;
+        setPopping(true);
+        onLike(post.id);
+      };
+
+      return (
+        <li className="fadein" style={{ animationDelay: `${Math.min(index, 8) * 50}ms` }}>
+          <Card className="overflow-hidden pl-7">
+            <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-1.5 ${c.stripe}`} />
+            <div className="flex items-center justify-between">
+              <Badge className={c.badge}>{c.emoji} {c.label}</Badge>
+              <time dateTime={post.createdAt} className="text-xs text-muted">{timeAgo(post.createdAt)}</time>
+            </div>
+            <p className="mt-4 whitespace-pre-wrap break-words font-letter text-[16px] leading-8">{post.content}</p>
+            <div className="mt-4 flex items-end justify-between gap-3">
+              <p className="font-pen text-xl text-muted">— {signOf(post.id)}</p>
+              <button
+                type="button"
+                onClick={click}
+                aria-pressed={liked}
+                aria-label={liked ? `공감함, 공감 ${post.likes}개` : `공감하기, 현재 공감 ${post.likes}개`}
+                className={`relative inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-heart ${liked ? 'bg-heart/15 text-heart cursor-default' : 'bg-blush/70 text-muted hover:bg-heart/15 hover:text-heart'}`}
+              >
+                {popping && <span aria-hidden="true" className="floatup pointer-events-none absolute -top-2 left-3 text-lg">💗</span>}
+                <span aria-hidden="true" className={popping ? 'pop' : ''} onAnimationEnd={() => setPopping(false)}>
+                  {liked ? '❤️' : '🤍'}
+                </span>
+                공감 <span className="tabular-nums">{post.likes}</span>
+              </button>
+            </div>
+          </Card>
+        </li>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function BoardPage() {
+      const [sort, setSort] = useState('latest');
+      const [filter, setFilter] = useState('all');
+      const [posts, setPosts] = useState([]);
+      const [counts, setCounts] = useState({ all: 0, worry: 0, praise: 0 });
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState('');
+      const [notice, setNotice] = useState('');
+      const [liked, setLiked] = useState(loadLiked);
+
+      const load = useCallback(async () => {
+        setLoading(true);
+        setError('');
+        try {
+          const q = new URLSearchParams({ sort });
+          if (filter !== 'all') q.set('category', filter);
+          const data = await api(`/posts?${q}`);
+          setPosts(data.posts);
+          setCounts(data.counts);
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      }, [sort, filter]);
+
+      useEffect(() => { load(); }, [load]);
+
+      useEffect(() => {
+        if (!notice) return;
+        const t = setTimeout(() => setNotice(''), 2800);
+        return () => clearTimeout(t);
+      }, [notice]);
+
+      const handleCreated = (post) => {
+        setNotice(post.category === 'worry' ? '고민을 우체통에 넣었어요. 혼자가 아니에요 🕯️' : '따뜻한 칭찬이 전해졌어요 🌼');
+        // 새 글이 바로 보이도록 최신순·해당 카테고리로 맞춘 뒤 다시 불러온다
+        if (sort === 'latest' && (filter === 'all' || filter === post.category)) load();
+        else { setSort('latest'); setFilter('all'); }
+      };
+
+      const handleLike = async (id) => {
+        // 낙관적 업데이트: 먼저 +1 보여주고, 실패하면 되돌린다
+        setPosts((ps) => ps.map((p) => (p.id === id ? { ...p, likes: p.likes + 1 } : p)));
+        const next = new Set(liked).add(id);
+        setLiked(next);
+        saveLiked(next);
+        try {
+          const { likes } = await api(`/posts/${id}/like`, { method: 'POST' });
+          setPosts((ps) => ps.map((p) => (p.id === id ? { ...p, likes } : p)));
+        } catch (err) {
+          setPosts((ps) => ps.map((p) => (p.id === id ? { ...p, likes: p.likes - 1 } : p)));
+          const rollback = new Set(next);
+          rollback.delete(id);
+          setLiked(rollback);
+          saveLiked(rollback);
+          setNotice(err.message);
+        }
+      };
+
+      const filterOptions = useMemo(() => [
+        { value: 'all', label: `전체 ${counts.all}` },
+        { value: 'worry', label: `${CATEGORY.worry.emoji} 고민 ${counts.worry}` },
+        { value: 'praise', label: `${CATEGORY.praise.emoji} 칭찬 ${counts.praise}` },
+      ], [counts]);
+
+      return (
+        <main className="space-y-8">
+          <WriteForm onCreated={handleCreated} />
+
+          <section aria-labelledby="list-title">
+            <h2 id="list-title" className="mb-3 font-letter text-lg font-bold">도착한 마음들</h2>
+            <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <SegmentedControl label="카테고리 필터" options={filterOptions} value={filter} onChange={setFilter} />
+              <SegmentedControl
+                label="정렬"
+                options={[{ value: 'latest', label: '최신순' }, { value: 'likes', label: '공감순' }]}
+                value={sort}
+                onChange={setSort}
+              />
+            </div>
+
+            {loading ? (
+              <div className="flex flex-col items-center gap-2 py-16" role="status" aria-live="polite">
+                <Spinner />
+                <span className="font-pen text-xl text-muted">편지를 꺼내오는 중…</span>
+              </div>
+            ) : error ? (
+              <Card className="text-center">
+                <p className="text-heart">{error}</p>
+                <Button variant="secondary" size="sm" className="mt-3" onClick={load}>다시 시도</Button>
+              </Card>
+            ) : posts.length === 0 ? (
+              <div className="py-16 text-center">
+                <p className="text-4xl" aria-hidden="true">📭</p>
+                <p className="mt-3 font-pen text-2xl text-muted">아직 조용한 우체통이에요</p>
+                <p className="mt-1 text-sm text-muted/80">첫 번째 마음을 남겨주세요.</p>
+              </div>
+            ) : (
+              <ul className="space-y-4">
+                {posts.map((p, i) => (
+                  <PostCard key={p.id} post={p} index={i} liked={liked.has(p.id)} onLike={handleLike} />
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-6 z-10 flex justify-center px-4">
+            {notice && (
+              <div className="fadein rounded-full bg-ink px-5 py-2.5 text-sm text-paper shadow-lg shadow-ember/20">
+                {notice}
+              </div>
+            )}
+          </div>
+        </main>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return (
+        <div className="mx-auto max-w-2xl px-4">
+          <Header />
+          <BoardPage />
+          <Footer />
+        </div>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
