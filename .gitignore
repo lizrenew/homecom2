@@ -16,3 +16,10 @@ $RECYCLE.BIN/
 *.tmp
 .env
 node_modules/
+
+# Claude Code local settings (holds API keys)
+.claude/settings.local.json
+
+# Playwright MCP logs (logged-in page snapshots)
+.playwright-mcp/
+week3/class/logs/

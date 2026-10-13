@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>댄스 챌린지 트렌드</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN은 버전 고정. Babel 은 반드시 7.x -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Noto Sans KR', system-ui, sans-serif; }
+    .font-display { font-family: 'Black Han Sans', 'Noto Sans KR', sans-serif; }
+    @keyframes floaty { 0%,100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-14px) rotate(2deg); } }
+    @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    @keyframes pulseGlow { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+    .animate-floaty { animation: floaty 6s ease-in-out infinite; }
+    .animate-marquee { animation: marquee 28s linear infinite; }
+    .animate-glow { animation: pulseGlow 3s ease-in-out infinite; }
+    .grain::before {
+      content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .06;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .animate-floaty, .animate-marquee, .animate-glow { animation: none; }
+    }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 grain">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useMemo, useCallback } = React;
+
+    // ========================================
+    // 📦 Data (2026-10-13 인스타그램 '댄스챌린지' 검색 리서치)
+    // ========================================
+    const RESEARCH_DATE = '2026-10-13';
+
+    const PERIODS = {
+      hot: { label: '🔥 요즘 (9~10월)', short: '요즘' },
+      summer: { label: '📅 여름 (6~8월)', short: '여름' },
+      early: { label: '🗓 올해 초 (2~4월)', short: '올해 초' },
+    };
+
+    const CHALLENGES = [
+      { id: 'DeOzSstyoxR', name: '밤편지 챌린지', note: '', date: '2026-10-08', account: 'pro_g_io', likes: 0, likesLabel: '0', period: 'hot', tags: ['#밤편지챌린지', '#댄스챌린지'], memo: '일반인 도전 영상. "스텝은 모르겠고 일단 뛰기"', url: 'https://www.instagram.com/pro_g_io/reel/DeOzSstyoxR/' },
+      { id: 'DeUfQdWoR5B', name: '효리수', note: '6세대 아이돌 효리수 야르~', date: '2026-10-10', account: 'zzaewon_ing', likes: 332, likesLabel: '332', period: 'hot', tags: ['#효리수'], memo: 'MLB키즈 협찬 콘텐츠', url: 'https://www.instagram.com/zzaewon_ing/reel/DeUfQdWoR5B/' },
+      { id: 'Dd9DDsuiq7u', name: '권루트 챌린지', note: '#l을가져가', date: '2026-10-01', account: '0_0_0_9_0_4', likes: 1112, likesLabel: '1,112', period: 'hot', tags: ['#권루트챌린지', '#l을가져가'], memo: '10월 들어 막 올라오는 중', url: 'https://www.instagram.com/0_0_0_9_0_4/reel/Dd9DDsuiq7u/' },
+      { id: 'Dd57iVhJL5M', name: '유행 릴스', note: '곡명 없음', date: '2026-09-30', account: 'a413835a', likes: 554, likesLabel: '554', period: 'hot', tags: ['#유행막차타기전문'], memo: '댓글 105개로 반응 활발', url: 'https://www.instagram.com/a413835a/reel/Dd57iVhJL5M/' },
+      { id: 'DdkjGFSzkw7', name: '퇴사 챌린지', note: '이만 퇴사해보겠습니다', date: '2026-09-21', account: 'greyraise_official', likes: 17000, likesLabel: '17K', period: 'hot', tags: ['#퇴사챌린지'], memo: '요즘 챌린지 중 좋아요 1위', url: 'https://www.instagram.com/greyraise_official/reel/DdkjGFSzkw7/', top: true },
+      { id: 'DdQcM_HSVYf', name: '퇴사 챌린지', note: '#전소연 · @i_dle_official', date: '2026-09-13', account: 'luna_dancefit', likes: 720, likesLabel: '720', period: 'hot', tags: ['#전소연', '#댄스챌린지'], memo: '"요즘 이 릴스는 대유행중"', url: 'https://www.instagram.com/luna_dancefit/reel/DdQcM_HSVYf/' },
+      { id: 'Dc0RtfhyhRA', name: '마음의 숲', note: '조선힙합', date: '2026-09-03', account: 'luna_dancefit', likes: 421, likesLabel: '421', period: 'hot', tags: ['#댄스챌린지'], memo: '힐링 무드의 안무', url: 'https://www.instagram.com/luna_dancefit/reel/Dc0RtfhyhRA/' },
+      { id: 'DcJvQypz5VS', name: '빌리지인', note: '#mj', date: '2026-08-17', account: 'pesssix', likes: 7352, likesLabel: '7,352', period: 'summer', tags: ['#댄스챌린지', '#mj'], memo: '여름 시즌 인기작', url: 'https://www.instagram.com/pesssix/reel/DcJvQypz5VS/' },
+      { id: 'DbU4RhsJya2', name: 'GUAP', note: '브랜드 광고', date: '2026-07-27', account: 'gorillaenergy.kr', likes: 2904, likesLabel: '2,904', period: 'summer', tags: ['#GUAP', '#고릴라에너지'], memo: '에너지드링크 브랜드 챌린지', url: 'https://www.instagram.com/gorillaenergy.kr/reel/DbU4RhsJya2/' },
+      { id: 'DaNOS69xhtH', name: 'GG EZ', note: '', date: '2026-06-30', account: 'fronting_official', likes: 2499, likesLabel: '2,499', period: 'summer', tags: ['#GGEZ', '#reelsdance'], memo: '댄스 크루 프론팅 커버', url: 'https://www.instagram.com/fronting_official/reel/DaNOS69xhtH/' },
+      { id: 'DZCls-GAnRM', name: 'Beauty And A Beat', note: '다시 유행', date: '2026-06-01', account: 'musicdalin', likes: 120, likesLabel: '120', period: 'summer', tags: ['#팝송챌린지'], memo: '"그 시절 우리가 사랑했던 팝송"의 재유행', url: 'https://www.instagram.com/musicdalin/reel/DZCls-GAnRM/' },
+      { id: 'DU2uEyfAZrx', name: '미워', note: '', date: '2026-02-17', account: 'fronting_official', likes: 38000, likesLabel: '38K', period: 'early', tags: ['#미워', '#겨울릴스'], memo: '올해 좋아요 최다 (38K)', url: 'https://www.instagram.com/fronting_official/reel/DU2uEyfAZrx/', top: true },
+      { id: 'DVT30uQAXnM', name: '늑대가 나타나', note: '', date: '2026-02-28', account: 'yjw_c1', likes: null, likesLabel: '비공개', period: 'early', tags: ['#choreography'], memo: '좋아요 수 비공개', url: 'https://www.instagram.com/yjw_c1/reel/DVT30uQAXnM/' },
+    ];
+
+    const EXCLUDED = [
+      '곡명을 알 수 없는 게시물 4개 — 스파오키즈 광고(@ge__c, 8/20, 35K), 키키코 코디 릴스 2개(4/8, 7/20), "유행이라 하기에.."(6/1)',
+      '오래된 게시물 13개 — 2022~2025년 게시물',
+    ];
+
+    const thumb = (id) => `../images/thumbs/${id}.jpg`;
+    const fmtDate = (d) => { const [, m, day] = d.split('-'); return `${Number(m)}/${Number(day)}`; };
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled = false, onClick, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-gradient-to-r from-fuchsia-500 to-orange-400 text-white hover:brightness-110 shadow-lg shadow-fuchsia-500/20',
+        secondary: 'bg-white/10 text-zinc-100 hover:bg-white/20 border border-white/10',
+        danger: 'bg-red-500 text-white hover:bg-red-600',
+        ghost: 'text-zinc-300 hover:text-white hover:bg-white/5',
+      };
+      const sizes = { sm: 'px-3 py-1.5 text-sm', md: 'px-4 py-2 text-sm', lg: 'px-6 py-3 text-base' };
+      return (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-2 rounded-full font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400 disabled:opacity-40 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ type = 'text', label, value, onChange, placeholder, error, disabled = false, className = '', id }) {
+      const inputId = id || `input-${label || 'field'}`;
+      return (
+        <div className={className}>
+          {label && <label htmlFor={inputId} className="sr-only">{label}</label>}
+          <input
+            id={inputId}
+            type={type}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            aria-invalid={!!error}
+            className="w-full rounded-full bg-white/5 border border-white/10 px-5 py-2.5 text-sm placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-fuchsia-400 focus:border-transparent"
+          />
+          {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+        </div>
+      );
+    }
+
+    function Card({ className = '', children, ...rest }) {
+      return (
+        <div className={`rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur ${className}`} {...rest}>
+          {children}
+        </div>
+      );
+    }
+
+    function Badge({ tone = 'default', className = '', children }) {
+      const tones = {
+        default: 'bg-white/10 text-zinc-200',
+        hot: 'bg-gradient-to-r from-fuchsia-500 to-orange-400 text-white',
+        muted: 'bg-zinc-800 text-zinc-400',
+      };
+      return <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold ${tones[tone]} ${className}`}>{children}</span>;
+    }
+
+    function Modal({ isOpen, onClose, title, size = 'md', children }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        document.addEventListener('keydown', onKey);
+        document.body.style.overflow = 'hidden';
+        return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = ''; };
+      }, [isOpen, onClose]);
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-md', md: 'max-w-2xl', lg: 'max-w-4xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
+          <div className={`relative w-full ${sizes[size]} max-h-[90vh] overflow-auto rounded-3xl bg-zinc-900 border border-white/10 shadow-2xl`}>
+            <button onClick={onClose} aria-label="닫기" className="absolute right-4 top-4 z-10 grid h-9 w-9 place-items-center rounded-full bg-black/50 text-zinc-200 hover:bg-black/80">✕</button>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    function Tabs({ tabs, value, onChange, className = '' }) {
+      return (
+        <div role="tablist" className={`flex flex-wrap gap-2 ${className}`}>
+          {tabs.map((t) => (
+            <button
+              key={t.value}
+              role="tab"
+              aria-selected={value === t.value}
+              onClick={() => onChange(t.value)}
+              className={`rounded-full px-4 py-2 text-sm font-bold transition ${value === t.value ? 'bg-white text-zinc-900' : 'bg-white/5 text-zinc-300 hover:bg-white/10'}`}
+            >
+              {t.label}
+              {t.count != null && <span className={`ml-1.5 text-xs ${value === t.value ? 'text-zinc-500' : 'text-zinc-500'}`}>{t.count}</span>}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Header() {
+      return (
+        <header className="sticky top-0 z-40 border-b border-white/5 bg-zinc-950/70 backdrop-blur">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+            <a href="#top" className="font-display text-xl tracking-wide">
+              <span className="bg-gradient-to-r from-fuchsia-400 to-orange-300 bg-clip-text text-transparent">DANCE</span> TREND
+            </a>
+            <nav className="flex gap-1 text-sm">
+              <a href="#ranking" className="rounded-full px-3 py-1.5 text-zinc-300 hover:bg-white/5 hover:text-white">랭킹</a>
+              <a href="#list" className="rounded-full px-3 py-1.5 text-zinc-300 hover:bg-white/5 hover:text-white">전체 목록</a>
+              <a href="#method" className="hidden sm:block rounded-full px-3 py-1.5 text-zinc-300 hover:bg-white/5 hover:text-white">조사 방법</a>
+            </nav>
+          </div>
+        </header>
+      );
+    }
+
+    function Marquee() {
+      const names = [...new Set(CHALLENGES.map((c) => c.name))];
+      const row = [...names, ...names];
+      return (
+        <div className="relative overflow-hidden border-y border-white/10 bg-gradient-to-r from-fuchsia-600/20 via-orange-500/10 to-fuchsia-600/20 py-3" aria-hidden="true">
+          <div className="animate-marquee flex w-max gap-8 whitespace-nowrap font-display text-lg text-zinc-200">
+            {row.map((n, i) => <span key={i}>{n} <span className="text-fuchsia-400">✦</span></span>)}
+          </div>
+        </div>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="border-t border-white/5 py-10 text-center text-xs text-zinc-500">
+          <p>조사일 {RESEARCH_DATE} · Playwright MCP로 수집한 인스타그램 공개 게시물 기반</p>
+          <p className="mt-1">썸네일과 콘텐츠의 저작권은 각 원작자에게 있습니다.</p>
+        </footer>
+      );
+    }
+
+    // ========================================
+    // 🧱 Feature Components
+    // ========================================
+    function ChallengeCard({ item, rank, onOpen }) {
+      return (
+        <button
+          onClick={() => onOpen(item)}
+          className="group relative block w-full overflow-hidden rounded-3xl border border-white/10 bg-zinc-900 text-left transition hover:-translate-y-1 hover:border-fuchsia-400/50 hover:shadow-2xl hover:shadow-fuchsia-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400"
+          aria-label={`${item.name} 상세 보기`}
+        >
+          <div className="relative aspect-[9/16] overflow-hidden">
+            <img src={thumb(item.id)} alt={`${item.name} 썸네일`} loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
+            <div className="absolute left-3 top-3 flex gap-1.5">
+              <Badge tone={item.period === 'hot' ? 'hot' : 'default'}>{PERIODS[item.period].short}</Badge>
+              {item.top && <Badge tone="hot">TOP</Badge>}
+            </div>
+            {rank && <div className="absolute right-3 top-2 font-display text-4xl text-white/90 drop-shadow">#{rank}</div>}
+            <div className="absolute inset-x-0 bottom-0 p-4">
+              <p className="font-display text-xl leading-tight">{item.name}</p>
+              {item.note && <p className="mt-0.5 line-clamp-1 text-xs text-zinc-300">{item.note}</p>}
+              <div className="mt-2 flex items-center justify-between text-xs text-zinc-300">
+                <span>@{item.account}</span>
+                <span className="font-bold text-white">♥ {item.likesLabel}</span>
+              </div>
+            </div>
+          </div>
+        </button>
+      );
+    }
+
+    function ChallengeDetail({ item }) {
+      return (
+        <div className="grid sm:grid-cols-[240px_1fr]">
+          <img src={thumb(item.id)} alt={`${item.name} 썸네일`} className="h-80 w-full object-cover sm:h-full sm:rounded-l-3xl" />
+          <div className="p-6 sm:p-8">
+            <Badge tone={item.period === 'hot' ? 'hot' : 'default'}>{PERIODS[item.period].label}</Badge>
+            <h2 className="mt-3 font-display text-3xl">{item.name}</h2>
+            {item.note && <p className="mt-1 text-zinc-400">{item.note}</p>}
+            <dl className="mt-6 grid grid-cols-2 gap-4 text-sm">
+              <div><dt className="text-zinc-500">게시일</dt><dd className="mt-0.5 font-bold">{item.date}</dd></div>
+              <div><dt className="text-zinc-500">좋아요</dt><dd className="mt-0.5 font-bold">♥ {item.likesLabel}</dd></div>
+              <div className="col-span-2"><dt className="text-zinc-500">계정</dt><dd className="mt-0.5 font-bold">@{item.account}</dd></div>
+              <div className="col-span-2"><dt className="text-zinc-500">메모</dt><dd className="mt-0.5">{item.memo}</dd></div>
+            </dl>
+            <div className="mt-5 flex flex-wrap gap-1.5">
+              {item.tags.map((t) => <Badge key={t} tone="muted">{t}</Badge>)}
+            </div>
+            <a href={item.url} target="_blank" rel="noopener noreferrer" className="mt-8 inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-orange-400 px-6 py-3 font-bold text-white hover:brightness-110">
+              인스타그램에서 릴스 보기 ↗
+            </a>
+          </div>
+        </div>
+      );
+    }
+
+    function StatCard({ value, label, sub }) {
+      return (
+        <Card className="p-5">
+          <p className="font-display text-3xl sm:text-4xl bg-gradient-to-r from-fuchsia-300 to-orange-200 bg-clip-text text-transparent">{value}</p>
+          <p className="mt-1 text-sm font-bold">{label}</p>
+          {sub && <p className="mt-0.5 text-xs text-zinc-500">{sub}</p>}
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Sections
+    // ========================================
+    function Hero() {
+      const heroThumbs = ['DdkjGFSzkw7', 'DU2uEyfAZrx', 'Dd9DDsuiq7u'];
+      return (
+        <section id="top" className="relative overflow-hidden">
+          <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-fuchsia-600/30 blur-3xl animate-glow" />
+          <div className="pointer-events-none absolute -right-20 top-40 h-80 w-80 rounded-full bg-orange-500/20 blur-3xl animate-glow" />
+          <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-4 py-16 md:grid-cols-2 md:py-24">
+            <div>
+              <Badge tone="hot">INSTAGRAM REPORT · {RESEARCH_DATE}</Badge>
+              <h1 className="mt-5 font-display text-5xl leading-[1.05] sm:text-6xl lg:text-7xl">
+                지금 다들<br />
+                <span className="bg-gradient-to-r from-fuchsia-400 via-pink-400 to-orange-300 bg-clip-text text-transparent">뭐 추고 있지?</span>
+              </h1>
+              <p className="mt-6 max-w-md text-zinc-400">
+                인스타그램 <b className="text-zinc-200">#댄스챌린지</b> 검색 상위 게시물을 모아 2026년 유행한 챌린지 13개를 정리했어요.
+                지금 가장 뜨거운 건 <b className="text-white">퇴사 챌린지</b>예요.
+              </p>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <a href="#ranking"><Button size="lg">랭킹 보기</Button></a>
+                <a href="#list"><Button size="lg" variant="secondary">전체 챌린지</Button></a>
+              </div>
+            </div>
+            <div className="relative mx-auto h-[420px] w-full max-w-sm" aria-hidden="true">
+              {heroThumbs.map((id, i) => (
+                <img
+                  key={id}
+                  src={thumb(id)}
+                  alt=""
+                  className="animate-floaty absolute w-44 rounded-3xl border-4 border-zinc-900 shadow-2xl sm:w-48"
+                  style={{
+                    left: ['0%', '32%', '58%'][i],
+                    top: ['12%', '0%', '18%'][i],
+                    zIndex: [1, 3, 2][i],
+                    animationDelay: `${i * -2}s`,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    function Stats() {
+      const hotCount = CHALLENGES.filter((c) => c.period === 'hot').length;
+      return (
+        <section className="mx-auto max-w-6xl px-4 py-12">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <StatCard value="30" label="수집한 게시물" sub="검색 상위 결과" />
+            <StatCard value="13" label="정리한 챌린지" sub="2026년 게시물 기준" />
+            <StatCard value={hotCount} label="요즘 뜨는 챌린지" sub="9~10월 게시" />
+            <StatCard value="38K" label="최다 좋아요" sub="미워 챌린지 (2월)" />
+          </div>
+        </section>
+      );
+    }
+
+    function Ranking({ onOpen }) {
+      const top = useMemo(() => [...CHALLENGES].filter((c) => c.likes != null).sort((a, b) => b.likes - a.likes).slice(0, 4), []);
+      return (
+        <section id="ranking" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-12">
+          <div className="mb-8 flex items-end justify-between gap-4">
+            <div>
+              <p className="text-sm font-bold text-fuchsia-400">LIKES RANKING</p>
+              <h2 className="mt-1 font-display text-3xl sm:text-4xl">좋아요 TOP 4</h2>
+            </div>
+            <p className="hidden text-sm text-zinc-500 sm:block">카드를 누르면 상세 정보가 열려요</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {top.map((item, i) => <ChallengeCard key={item.id} item={item} rank={i + 1} onOpen={onOpen} />)}
+          </div>
+        </section>
+      );
+    }
+
+    function ChallengeList({ onOpen }) {
+      const [period, setPeriod] = useState('all');
+      const [query, setQuery] = useState('');
+      const [sort, setSort] = useState('date');
+
+      const counts = useMemo(() => CHALLENGES.reduce((acc, c) => ({ ...acc, [c.period]: (acc[c.period] || 0) + 1 }), {}), []);
+      const tabs = [
+        { value: 'all', label: '전체', count: CHALLENGES.length },
+        ...Object.entries(PERIODS).map(([k, v]) => ({ value: k, label: v.label, count: counts[k] || 0 })),
+      ];
+
+      const items = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return CHALLENGES
+          .filter((c) => period === 'all' || c.period === period)
+          .filter((c) => !q || [c.name, c.note, c.account, ...c.tags].join(' ').toLowerCase().includes(q))
+          .sort((a, b) => sort === 'likes' ? (b.likes ?? -1) - (a.likes ?? -1) : b.date.localeCompare(a.date));
+      }, [period, query, sort]);
+
+      return (
+        <section id="list" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-12">
+          <p className="text-sm font-bold text-fuchsia-400">ALL CHALLENGES</p>
+          <h2 className="mt-1 font-display text-3xl sm:text-4xl">전체 챌린지</h2>
+
+          <div className="mt-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <Tabs tabs={tabs} value={period} onChange={setPeriod} />
+            <div className="flex gap-2">
+              <Input label="챌린지 검색" id="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="챌린지·계정·해시태그 검색" className="flex-1 lg:w-64" />
+              <Button variant="secondary" onClick={() => setSort(sort === 'date' ? 'likes' : 'date')} aria-label="정렬 기준 바꾸기">
+                {sort === 'date' ? '최신순' : '좋아요순'} ⇅
+              </Button>
+            </div>
+          </div>
+
+          {items.length === 0 ? (
+            <Card className="mt-8 p-12 text-center">
+              <p className="text-4xl">🕺</p>
+              <p className="mt-3 font-bold">"{query}"에 맞는 챌린지가 없어요</p>
+              <Button variant="ghost" size="sm" className="mt-3" onClick={() => { setQuery(''); setPeriod('all'); }}>필터 초기화</Button>
+            </Card>
+          ) : (
+            <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+              {items.map((item) => <ChallengeCard key={item.id} item={item} onOpen={onOpen} />)}
+            </div>
+          )}
+
+          <div className="mt-12 overflow-x-auto rounded-3xl border border-white/10">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <caption className="sr-only">챌린지 요약 표</caption>
+              <thead className="bg-white/5 text-zinc-400">
+                <tr>
+                  <th className="px-4 py-3 font-medium">챌린지</th>
+                  <th className="px-4 py-3 font-medium">게시일</th>
+                  <th className="px-4 py-3 font-medium">계정</th>
+                  <th className="px-4 py-3 font-medium text-right">좋아요</th>
+                  <th className="px-4 py-3 font-medium">링크</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {items.map((c) => (
+                  <tr key={c.id} className="hover:bg-white/[0.03]">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <img src={thumb(c.id)} alt="" className="h-12 w-7 rounded object-cover" />
+                        <span className="font-bold">{c.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-zinc-400">{fmtDate(c.date)}</td>
+                    <td className="px-4 py-3 text-zinc-400">@{c.account}</td>
+                    <td className="px-4 py-3 text-right font-bold">{c.likesLabel}</td>
+                    <td className="px-4 py-3"><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-fuchsia-400 hover:underline">릴스 ↗</a></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      );
+    }
+
+    function Method() {
+      return (
+        <section id="method" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-12">
+          <Card className="grid gap-8 p-6 sm:p-10 md:grid-cols-2">
+            <div>
+              <p className="text-sm font-bold text-fuchsia-400">METHOD</p>
+              <h2 className="mt-1 font-display text-3xl">조사 방법</h2>
+              <ol className="mt-5 space-y-3 text-sm text-zinc-300">
+                <li><b className="text-white">1.</b> Playwright MCP로 인스타그램 검색 탭에서 <b>댄스챌린지</b> 키워드 검색</li>
+                <li><b className="text-white">2.</b> 상위 게시물 30개 수집</li>
+                <li><b className="text-white">3.</b> 2026년 게시물 17개의 작성자·날짜·캡션 확인 후 13개 챌린지로 정리</li>
+              </ol>
+              <p className="mt-5 text-xs text-zinc-500">좋아요 수는 {RESEARCH_DATE} 기준이며, 인스타그램 추천 순서 결과라 전체 인기 순위와는 다를 수 있어요.</p>
+            </div>
+            <div>
+              <h3 className="font-display text-2xl">정리에서 뺀 것</h3>
+              <ul className="mt-5 space-y-3 text-sm text-zinc-400">
+                {EXCLUDED.map((e) => <li key={e} className="flex gap-2"><span className="text-fuchsia-400">—</span>{e}</li>)}
+              </ul>
+            </div>
+          </Card>
+        </section>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      const [selected, setSelected] = useState(null);
+      const open = useCallback((item) => setSelected(item), []);
+      const close = useCallback(() => setSelected(null), []);
+
+      return (
+        <div className="relative z-10">
+          <Header />
+          <main>
+            <Hero />
+            <Marquee />
+            <Stats />
+            <Ranking onOpen={open} />
+            <ChallengeList onOpen={open} />
+            <Method />
+          </main>
+          <Footer />
+          <Modal isOpen={!!selected} onClose={close} title={selected?.name} size="md">
+            {selected && <ChallengeDetail item={selected} />}
+          </Modal>
+        </div>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
