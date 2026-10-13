@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>월급 어디쯤</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN은 버전을 고정한다. Babel 은 반드시 7.x (8.x는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    /* 차트 색은 역할(token)로 정의하고 다크 모드에서 단계만 바꾼다 */
+    :root {
+      --series-1: #2a78d6;   /* 나 */
+      --series-2: #eb6834;   /* 전체 평균 */
+      --series-3: #1baf7a;   /* 내 직군 평균 */
+      --bar-muted: #bcd3f0;  /* 분포 막대(내 구간 외) */
+      --grid: #e7e6e2;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --series-1: #3987e5;
+        --series-2: #d95926;
+        --series-3: #199e70;
+        --bar-muted: #2c4767;
+        --grid: #33332f;
+      }
+    }
+    body { font-family: 'Pretendard', system-ui, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }
+    input[type=number]::-webkit-inner-spin-button { opacity: .4; }
+    @keyframes rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+    .bar-rise { transform-origin: bottom; animation: rise .5s ease-out both; }
+    @keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+    .bar-grow { transform-origin: left; animation: grow .5s ease-out both; }
+    @media (prefers-reduced-motion: reduce) { .bar-rise, .bar-grow { animation: none; } }
+  </style>
+</head>
+<body class="bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useCallback } = React;
+
+    const API_BASE_URL = '/api';
+    const STORAGE_KEY = 'salary-compare:last';
+
+    // ========================================
+    // 🛠️ Utils
+    // ========================================
+    const fmt = (v) => (v === null || v === undefined ? '–' : Number(v).toLocaleString('ko-KR', { maximumFractionDigits: 1 }));
+    const won = (v) => (v === null || v === undefined ? '–' : `${fmt(v)}만원`);
+
+    async function api(path, options = {}) {
+      const res = await fetch(`${API_BASE_URL}${path}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.success) throw new Error(body.message || '요청에 실패했어요');
+      return body.data;
+    }
+
+    const storage = {
+      get() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { return null; } },
+      set(v) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(v)); } catch {} },
+      clear() { try { localStorage.removeItem(STORAGE_KEY); } catch {} },
+    };
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, type = 'button', className = '', children }) {
+      const variants = {
+        primary: 'bg-stone-900 text-white hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white',
+        secondary: 'bg-white text-stone-800 ring-1 ring-stone-300 hover:bg-stone-100 dark:bg-stone-900 dark:text-stone-100 dark:ring-stone-700 dark:hover:bg-stone-800',
+        ghost: 'text-stone-600 hover:bg-stone-200/60 dark:text-stone-300 dark:hover:bg-stone-800',
+      };
+      const sizes = { sm: 'px-3 py-1.5 text-sm', md: 'px-4 py-2.5 text-sm', lg: 'px-5 py-3 text-base' };
+      return (
+        <button
+          type={type}
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--series-1)] disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ id, label, value, onChange, suffix, error, className = '', ...rest }) {
+      return (
+        <div className={className}>
+          {label && <label htmlFor={id} className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">{label}</label>}
+          <div className={`flex items-center rounded-xl bg-white ring-1 focus-within:ring-2 focus-within:ring-[var(--series-1)] dark:bg-stone-900 ${error ? 'ring-red-500' : 'ring-stone-300 dark:ring-stone-700'}`}>
+            <input
+              id={id}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              aria-invalid={!!error}
+              className="w-full min-w-0 rounded-xl bg-transparent px-3 py-2.5 text-right tabular-nums outline-none"
+              {...rest}
+            />
+            {suffix && <span className="pr-3 text-sm text-stone-500 dark:text-stone-400 whitespace-nowrap">{suffix}</span>}
+          </div>
+          {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+        </div>
+      );
+    }
+
+    function Select({ id, label, value, onChange, options, placeholder, error }) {
+      return (
+        <div>
+          {label && <label htmlFor={id} className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">{label}</label>}
+          <select
+            id={id}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            aria-invalid={!!error}
+            className={`w-full rounded-xl bg-white px-3 py-2.5 ring-1 outline-none focus:ring-2 focus:ring-[var(--series-1)] dark:bg-stone-900 ${error ? 'ring-red-500' : 'ring-stone-300 dark:ring-stone-700'}`}
+          >
+            {placeholder && <option value="">{placeholder}</option>}
+            {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+        </div>
+      );
+    }
+
+    function Card({ title, subtitle, action, className = '', children }) {
+      return (
+        <section className={`rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-800 sm:p-6 ${className}`}>
+          {(title || action) && (
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                {title && <h2 className="text-base font-bold">{title}</h2>}
+                {subtitle && <p className="mt-0.5 text-sm text-stone-500 dark:text-stone-400">{subtitle}</p>}
+              </div>
+              {action}
+            </div>
+          )}
+          {children}
+        </section>
+      );
+    }
+
+    function StatTile({ label, value, unit, hint, accent }) {
+      return (
+        <div className={`rounded-2xl p-4 ring-1 ${accent ? 'bg-[var(--series-1)] text-white ring-transparent' : 'bg-white ring-stone-200 dark:bg-stone-900 dark:ring-stone-800'}`}>
+          <p className={`text-xs font-medium ${accent ? 'text-white/80' : 'text-stone-500 dark:text-stone-400'}`}>{label}</p>
+          <p className="mt-1 text-2xl font-extrabold tabular-nums sm:text-3xl">
+            {value}<span className="ml-0.5 text-base font-bold">{unit}</span>
+          </p>
+          {hint && <p className={`mt-1 text-xs ${accent ? 'text-white/80' : 'text-stone-500 dark:text-stone-400'}`}>{hint}</p>}
+        </div>
+      );
+    }
+
+    function Legend({ items }) {
+      return (
+        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-600 dark:text-stone-300">
+          {items.map((it) => (
+            <li key={it.label} className="flex items-center gap-1.5">
+              <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: it.color }} aria-hidden="true" />
+              {it.label}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    function Toggle({ options, value, onChange, label }) {
+      return (
+        <div role="tablist" aria-label={label} className="inline-flex rounded-lg bg-stone-100 p-0.5 text-xs dark:bg-stone-800">
+          {options.map((o) => (
+            <button
+              key={o.value}
+              role="tab"
+              aria-selected={value === o.value}
+              onClick={() => onChange(o.value)}
+              className={`rounded-md px-2.5 py-1 font-medium transition ${value === o.value ? 'bg-white shadow-sm dark:bg-stone-950' : 'text-stone-500 dark:text-stone-400'}`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function Spinner() {
+      return <div className="h-6 w-6 animate-spin rounded-full border-2 border-stone-300 border-t-[var(--series-1)]" role="status" aria-label="불러오는 중" />;
+    }
+
+    function EmptyState({ children }) {
+      return <p className="rounded-xl bg-stone-100 px-4 py-8 text-center text-sm text-stone-500 dark:bg-stone-800/60 dark:text-stone-400">{children}</p>;
+    }
+
+    // ========================================
+    // 📊 Chart Components
+    // ========================================
+
+    // 월급 분포 히스토그램 — 단일 시리즈, 내 구간만 강조
+    function Histogram({ bins, myBin }) {
+      const [hover, setHover] = useState(null);
+      const max = Math.max(1, ...bins.map((b) => b.count));
+      const total = bins.reduce((a, b) => a + b.count, 0);
+      const active = hover !== null ? bins[hover] : null;
+
+      return (
+        <div>
+          <div className="mb-2 h-10 text-sm" aria-live="polite">
+            {active ? (
+              <p>
+                <span className="font-semibold">{active.label}만원</span>
+                <span className="ml-2 tabular-nums text-stone-500 dark:text-stone-400">
+                  {active.count}명 · {total ? fmt((active.count / total) * 100) : 0}%
+                </span>
+                {active.bin === myBin && <span className="ml-2 font-semibold text-[var(--series-1)]">← 내 구간</span>}
+              </p>
+            ) : (
+              <p className="text-stone-500 dark:text-stone-400">막대에 마우스를 올리면 인원이 보여요</p>
+            )}
+          </div>
+          <div className="relative flex h-48 items-end gap-[2px] border-b border-[var(--grid)]" onMouseLeave={() => setHover(null)}>
+            {bins.map((b) => {
+              const isMine = b.bin === myBin;
+              return (
+                <button
+                  key={b.bin}
+                  type="button"
+                  onMouseEnter={() => setHover(b.bin)}
+                  onFocus={() => setHover(b.bin)}
+                  onBlur={() => setHover(null)}
+                  aria-label={`${b.label}만원 ${b.count}명${isMine ? ', 내 구간' : ''}`}
+                  className="group relative flex h-full flex-1 items-end focus:outline-none"
+                >
+                  {isMine && (
+                    <span className="absolute -top-1 left-1/2 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded bg-[var(--series-1)] px-1.5 py-0.5 text-[10px] font-bold text-white">나</span>
+                  )}
+                  <span
+                    className={`bar-rise block w-full rounded-t-[4px] transition-opacity ${hover !== null && hover !== b.bin ? 'opacity-60' : ''} group-focus-visible:ring-2 group-focus-visible:ring-stone-900`}
+                    style={{
+                      height: b.count ? `${Math.max(2, (b.count / max) * 100)}%` : '0%',
+                      background: isMine ? 'var(--series-1)' : 'var(--bar-muted)',
+                      animationDelay: `${b.bin * 25}ms`,
+                    }}
+                  />
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-1.5 flex gap-[2px] text-[10px] text-stone-500 dark:text-stone-400">
+            {bins.map((b, i) => (
+              <span key={b.bin} className="flex-1 text-center tabular-nums">
+                {i === 0 ? `<${b.max}` : i === bins.length - 1 ? `${b.min}+` : i % 2 === 1 ? b.min : ''}
+              </span>
+            ))}
+          </div>
+          <p className="mt-1 text-right text-[11px] text-stone-400">월급(세후, 만원)</p>
+        </div>
+      );
+    }
+
+    // 카테고리별 지출 비교 — 가로 그룹 막대
+    function CategoryChart({ categories, series }) {
+      const [hover, setHover] = useState(null);
+      const max = Math.max(1, ...series.flatMap((s) => categories.map((c) => s.values?.[c.key] || 0)));
+      return (
+        <div className="space-y-3">
+          {categories.map((c) => (
+            <div
+              key={c.key}
+              className="grid grid-cols-[5.5rem_1fr] items-center gap-3 sm:grid-cols-[6.5rem_1fr]"
+              onMouseEnter={() => setHover(c.key)}
+              onMouseLeave={() => setHover(null)}
+            >
+              <span className="text-sm text-stone-700 dark:text-stone-300">{c.label}</span>
+              <div className="space-y-[2px]">
+                {series.map((s) => {
+                  const v = s.values?.[c.key];
+                  return (
+                    <div key={s.label} className="flex items-center gap-2" title={`${s.label} ${c.label}: ${won(v)}`}>
+                      <div className="h-3 flex-1">
+                        <div
+                          className="bar-grow h-full rounded-r-[4px]"
+                          style={{ width: v ? `${Math.max(1, (v / max) * 100)}%` : '0%', background: s.color }}
+                        />
+                      </div>
+                      <span className={`w-16 shrink-0 text-right text-xs tabular-nums ${hover === c.key ? 'text-stone-900 dark:text-stone-100 font-semibold' : 'text-stone-500 dark:text-stone-400'}`}>
+                        {v === null || v === undefined ? '–' : fmt(v)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    function CategoryTable({ categories, series }) {
+      return (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-stone-200 text-left text-xs text-stone-500 dark:border-stone-800 dark:text-stone-400">
+                <th className="py-2 font-medium">카테고리</th>
+                {series.map((s) => <th key={s.label} className="py-2 text-right font-medium">{s.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {categories.map((c) => (
+                <tr key={c.key} className="border-b border-stone-100 dark:border-stone-800/60">
+                  <td className="py-2">{c.label}</td>
+                  {series.map((s) => <td key={s.label} className="py-2 text-right tabular-nums">{fmt(s.values?.[c.key])}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 text-right text-[11px] text-stone-400">단위: 만원/월</p>
+        </div>
+      );
+    }
+
+    // 직군별 평균 월급 — 내 직군 강조
+    function JobChart({ rows, myJob, minGroup }) {
+      const max = Math.max(1, ...rows.map((r) => r.avgSalary || 0));
+      return (
+        <ul className="space-y-2">
+          {rows.map((r) => {
+            const isMine = r.job === myJob;
+            return (
+              <li key={r.job} className="grid grid-cols-[5.5rem_1fr_4.5rem] items-center gap-3 text-sm sm:grid-cols-[6.5rem_1fr_5rem]">
+                <span className={isMine ? 'font-bold' : 'text-stone-700 dark:text-stone-300'}>{r.job}</span>
+                <div className="h-4">
+                  {r.avgSalary !== null ? (
+                    <div
+                      className="bar-grow h-full rounded-r-[4px]"
+                      style={{ width: `${(r.avgSalary / max) * 100}%`, background: isMine ? 'var(--series-1)' : 'var(--bar-muted)' }}
+                    />
+                  ) : (
+                    <span className="text-xs text-stone-400">표본 {minGroup}명 미만 · 비공개</span>
+                  )}
+                </div>
+                <span className="text-right tabular-nums">
+                  {r.avgSalary !== null ? fmt(r.avgSalary) : '–'}
+                  <span className="ml-1 text-[11px] text-stone-400">({r.count})</span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      );
+    }
+
+    // ========================================
+    // 🧩 Layout Components
+    // ========================================
+    function Header() {
+      return (
+        <header className="mx-auto max-w-5xl px-4 pb-2 pt-8 sm:pt-12">
+          <p className="text-sm font-semibold text-[var(--series-1)]">익명 월급·지출 비교</p>
+          <h1 className="mt-1 text-3xl font-extrabold tracking-tight sm:text-4xl">내 월급, 어디쯤일까?</h1>
+          <p className="mt-2 max-w-xl text-sm text-stone-600 dark:text-stone-400">
+            월급과 지출을 입력하면 다른 사람들과 비교해 드려요. 이름·이메일·IP 등 개인을 알아볼 수 있는 정보는 저장하지 않아요.
+          </p>
+        </header>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="mx-auto max-w-5xl px-4 py-10 text-xs text-stone-400">
+          모든 금액은 세후 월 기준(만원)입니다. 참여자가 적은 그룹은 익명성을 위해 평균을 공개하지 않아요.
+        </footer>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Sections
+    // ========================================
+    const emptyForm = (categories) => ({
+      job: '', years: '', salary: '',
+      spending: Object.fromEntries(categories.map((c) => [c.key, ''])),
+    });
+
+    function EntryForm({ meta, initial, onSubmitted }) {
+      const [form, setForm] = useState(() => initial || emptyForm(meta.categories));
+      const [errors, setErrors] = useState({});
+      const [submitting, setSubmitting] = useState(false);
+      const [serverError, setServerError] = useState('');
+
+      const spendTotal = useMemo(
+        () => meta.categories.reduce((a, c) => a + (Number(form.spending[c.key]) || 0), 0),
+        [form.spending, meta.categories]
+      );
+
+      const set = (key) => (v) => setForm((f) => ({ ...f, [key]: v }));
+      const setSpend = (key) => (v) => setForm((f) => ({ ...f, spending: { ...f.spending, [key]: v } }));
+
+      const validate = () => {
+        const e = {};
+        if (!form.job) e.job = '직군을 선택해주세요';
+        const y = Number(form.years);
+        if (form.years === '' || !Number.isInteger(y) || y < 0 || y > 50) e.years = '0~50 사이 정수';
+        const s = Number(form.salary);
+        if (form.salary === '' || !Number.isInteger(s) || s < 1 || s > 10000) e.salary = '1~10,000 사이 정수(만원)';
+        meta.categories.forEach((c) => {
+          const raw = form.spending[c.key];
+          const n = Number(raw);
+          if (raw !== '' && (!Number.isInteger(n) || n < 0 || n > 10000)) e[`sp_${c.key}`] = '0 이상 정수';
+        });
+        setErrors(e);
+        return Object.keys(e).length === 0;
+      };
+
+      const submit = async (ev) => {
+        ev.preventDefault();
+        setServerError('');
+        if (!validate()) return;
+        setSubmitting(true);
+        try {
+          const payload = {
+            job: form.job,
+            years: Number(form.years),
+            salary: Number(form.salary),
+            spending: Object.fromEntries(meta.categories.map((c) => [c.key, Number(form.spending[c.key]) || 0])),
+          };
+          const saved = await api('/entries', { method: 'POST', body: JSON.stringify(payload) });
+          onSubmitted(saved, form);
+        } catch (err) {
+          setServerError(err.message);
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      return (
+        <Card title="내 정보 입력" subtitle="세후 월 기준, 만원 단위로 입력해 주세요">
+          <form onSubmit={submit} noValidate className="space-y-5">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2 sm:col-span-1">
+                <Select
+                  id="job" label="직군" value={form.job} onChange={set('job')} error={errors.job}
+                  placeholder="선택" options={meta.jobs.map((j) => ({ value: j, label: j }))}
+                />
+              </div>
+              <Input id="years" label="연차" type="number" inputMode="numeric" min="0" max="50" placeholder="0"
+                value={form.years} onChange={set('years')} suffix="년차" error={errors.years} className="col-span-2 sm:col-span-1" />
+            </div>
+            <Input id="salary" label="월급 (세후 실수령)" type="number" inputMode="numeric" min="1" placeholder="예: 320"
+              value={form.salary} onChange={set('salary')} suffix="만원" error={errors.salary} />
+
+            <fieldset>
+              <legend className="mb-2 flex w-full items-baseline justify-between text-sm font-medium text-stone-700 dark:text-stone-300">
+                <span>카테고리별 월 지출</span>
+                <span className="text-xs font-normal text-stone-500">합계 <b className="tabular-nums text-stone-900 dark:text-stone-100">{fmt(spendTotal)}</b>만원</span>
+              </legend>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                {meta.categories.map((c) => (
+                  <div key={c.key}>
+                    <label htmlFor={`sp_${c.key}`} className="mb-0.5 block text-xs text-stone-500 dark:text-stone-400">{c.label}</label>
+                    <Input id={`sp_${c.key}`} type="number" inputMode="numeric" min="0" placeholder="0"
+                      value={form.spending[c.key]} onChange={setSpend(c.key)} suffix="만원" error={errors[`sp_${c.key}`]} />
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">비워 둔 항목은 0으로 계산돼요. 월 지출은 각 항목의 합계예요.</p>
+            </fieldset>
+
+            {serverError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-300">{serverError}</p>}
+
+            <Button type="submit" size="lg" className="w-full" disabled={submitting}>
+              {submitting ? '저장 중…' : '익명으로 저장하고 비교하기'}
+            </Button>
+          </form>
+        </Card>
+      );
+    }
+
+    function MyPosition({ me, mine, overall, minGroup }) {
+      const saveRate = mine.salary ? Math.round(((mine.salary - mine.spendTotal) / mine.salary) * 100) : null;
+      const job = me.salaryTopInJob;
+      const group = me.salaryTopInGroup;
+      // 표본이 minGroup 미만이면 서버가 top 을 null 로 준다
+      const rankTile = (top) => (top === null || top === undefined ? { value: '집계 전', unit: '' } : { value: `상위 ${fmt(top)}`, unit: '%' });
+      const groupHint = (g) => (g.top === null ? `${g.total}명 · ${minGroup}명부터 공개` : `${g.total}명 중`);
+      const diff = mine.salary - overall.avgSalary;
+      return (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatTile accent label="전체 중 내 월급" {...rankTile(me.salaryTop)}
+            hint={`평균 ${won(overall.avgSalary)} 대비 ${diff >= 0 ? '+' : ''}${fmt(diff)}만원`} />
+          <StatTile label={`${mine.job} 직군 중`} {...rankTile(job?.top)} hint={job ? groupHint(job) : ''} />
+          <StatTile label={group ? `${mine.job} · ${group.band}` : '같은 연차대'} {...rankTile(group?.top)} hint={group ? groupHint(group) : ''} />
+          <StatTile label="내 월 지출 (많이 쓰는 순)" {...rankTile(me.spendTop)}
+            hint={`${won(mine.spendTotal)} · 저축 여력 ${saveRate === null ? '–' : `${saveRate}%`}`} />
+        </div>
+      );
+    }
+
+    function OverallTiles({ overall }) {
+      return (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatTile label="참여자" value={fmt(overall.count)} unit="명" />
+          <StatTile label="평균 월급" value={fmt(overall.avgSalary)} unit="만원" hint={`중앙값 ${won(overall.medianSalary)}`} />
+          <StatTile label="평균 월 지출" value={fmt(overall.avgSpend)} unit="만원" hint={`중앙값 ${won(overall.medianSpend)}`} />
+          <StatTile label="평균 저축 여력" unit="%"
+            value={overall.avgSalary ? fmt(Math.round(((overall.avgSalary - overall.avgSpend) / overall.avgSalary) * 100)) : '–'}
+            hint="(평균 월급 − 평균 지출) ÷ 평균 월급" />
+        </div>
+      );
+    }
+
+    function CategorySection({ meta, stats, mine }) {
+      const [view, setView] = useState('chart');
+      const series = [];
+      if (mine) series.push({ label: '나', color: 'var(--series-1)', values: mine.spending });
+      series.push({ label: '전체 평균', color: 'var(--series-2)', values: stats.categories.overall });
+      const jobCat = stats.categories.job;
+      if (jobCat?.avg) series.push({ label: `${jobCat.job} 평균`, color: 'var(--series-3)', values: jobCat.avg });
+
+      return (
+        <Card
+          title="카테고리별 평균 지출"
+          subtitle={jobCat && !jobCat.avg ? `${jobCat.job} 직군은 아직 ${meta.minGroup}명 미만이라 직군 평균은 숨겼어요` : '만원/월'}
+          action={<Toggle label="보기 방식" value={view} onChange={setView} options={[{ value: 'chart', label: '차트' }, { value: 'table', label: '표' }]} />}
+        >
+          {!stats.categories.overall ? (
+            <EmptyState>아직 데이터가 없어요.</EmptyState>
+          ) : view === 'chart' ? (
+            <>
+              <div className="mb-4"><Legend items={series} /></div>
+              <CategoryChart categories={meta.categories} series={series} />
+            </>
+          ) : (
+            <CategoryTable categories={meta.categories} series={series} />
+          )}
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      const [meta, setMeta] = useState(null);
+      const [stats, setStats] = useState(null);
+      const [mine, setMine] = useState(() => storage.get()?.saved || null);
+      const [editing, setEditing] = useState(() => !storage.get()?.saved);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState('');
+
+      const loadStats = useCallback(async (m) => {
+        const qs = m
+          ? `?${new URLSearchParams({ job: m.job, years: m.years, salary: m.salary, spend: m.spendTotal })}`
+          : '';
+        setStats(await api(`/stats${qs}`));
+      }, []);
+
+      useEffect(() => {
+        (async () => {
+          try {
+            setMeta(await api('/meta'));
+            await loadStats(mine);
+          } catch (err) {
+            setError(err.message);
+          } finally {
+            setLoading(false);
+          }
+        })();
+      }, []);
+
+      const handleSubmitted = async (saved, form) => {
+        storage.set({ saved, form });
+        setMine(saved);
+        setEditing(false);
+        try { await loadStats(saved); } catch (err) { setError(err.message); }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+
+      const reset = () => {
+        setEditing(true);
+      };
+
+      if (loading) {
+        return (
+          <div className="flex min-h-screen items-center justify-center"><Spinner /></div>
+        );
+      }
+
+      if (error && !meta) {
+        return (
+          <div className="mx-auto max-w-md px-4 py-24 text-center">
+            <p className="text-lg font-bold">데이터를 불러오지 못했어요</p>
+            <p className="mt-2 text-sm text-stone-500">{error}</p>
+            <Button className="mt-6" onClick={() => location.reload()}>다시 시도</Button>
+          </div>
+        );
+      }
+
+      const hasData = stats?.overall.count > 0;
+      const showMine = mine && !editing && stats?.me;
+
+      return (
+        <>
+          <Header />
+          <main className="mx-auto max-w-5xl space-y-5 px-4 py-4">
+            {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-300">{error}</p>}
+
+            {editing ? (
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,26rem)_1fr]">
+                <EntryForm meta={meta} initial={storage.get()?.form} onSubmitted={handleSubmitted} />
+                <div className="space-y-5">
+                  {hasData ? (
+                    <>
+                      <OverallTiles overall={stats.overall} />
+                      <Card title="월급 분포" subtitle="입력하면 내 위치가 표시돼요">
+                        <Histogram bins={stats.histogram} myBin={null} />
+                      </Card>
+                    </>
+                  ) : (
+                    <Card><EmptyState>아직 참여자가 없어요. 첫 번째로 입력해 보세요!</EmptyState></Card>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm text-stone-600 dark:text-stone-400">
+                    <b className="text-stone-900 dark:text-stone-100">{mine.job} · {mine.years}년차</b> · 월급 {won(mine.salary)} · 지출 {won(mine.spendTotal)}
+                  </p>
+                  <Button variant="secondary" size="sm" onClick={reset}>다시 입력하기</Button>
+                </div>
+                {showMine && <MyPosition me={stats.me} mine={mine} overall={stats.overall} minGroup={meta.minGroup} />}
+                <OverallTiles overall={stats.overall} />
+                <Card title="월급 분포" subtitle={`전체 ${fmt(stats.overall.count)}명 · 파란 막대가 내 구간`}>
+                  <Histogram bins={stats.histogram} myBin={stats.me?.bin ?? null} />
+                </Card>
+              </>
+            )}
+
+            {hasData && (
+              <div className="grid gap-5 lg:grid-cols-2">
+                <CategorySection meta={meta} stats={stats} mine={showMine ? mine : null} />
+                <Card title="직군별 평균 월급" subtitle="만원/월 · 괄호는 참여자 수">
+                  <JobChart rows={stats.byJob} myJob={showMine ? mine.job : null} minGroup={meta.minGroup} />
+                </Card>
+              </div>
+            )}
+          </main>
+          <Footer />
+        </>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
