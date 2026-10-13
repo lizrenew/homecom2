@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>지브리풍 그림 공방</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN은 버전 고정. Babel 은 반드시 7.x -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    body { background: linear-gradient(180deg, #e0f2fe 0%, #f0fdf4 60%, #fefce8 100%); min-height: 100vh; }
+    .spinner { width: 42px; height: 42px; border: 4px solid #bbf7d0; border-top-color: #16a34a; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="text-slate-800">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState } = React;
+
+    // ========================================
+    // ⚙️ Constants & Utils
+    // ========================================
+    // fal.ai 동기 실행 엔드포인트 (요청 → 완성된 이미지 URL 응답)
+    const FAL_BASE = 'https://fal.run/';
+    const MODELS = [
+      { id: 'fal-ai/flux/dev', label: 'FLUX dev (고품질)' },
+      { id: 'fal-ai/flux/schnell', label: 'FLUX schnell (빠름)' },
+    ];
+    const STYLE = 'Studio Ghibli style hand-drawn anime illustration, soft watercolor background, warm gentle lighting, nostalgic and peaceful mood, detailed and whimsical';
+    const PRESETS = [
+      { label: '🍎 사과 먹는 소녀', subject: 'a young girl happily biting into a shiny red apple, sitting in a sunlit green meadow with fluffy white clouds' },
+      { label: '🐈 고양이와 소년', subject: 'a boy reading a book under a big tree with a sleepy cat on his lap' },
+      { label: '🏡 시골 집', subject: 'a cozy countryside house with a red roof surrounded by flower fields' },
+    ];
+    const KEY_STORAGE = 'fal_api_key';
+
+    const loadKey = () => { try { return localStorage.getItem(KEY_STORAGE) || ''; } catch { return ''; } };
+    const saveKey = (k) => { try { localStorage.setItem(KEY_STORAGE, k); } catch {} };
+
+    async function generateImage({ apiKey, model, prompt }) {
+      const res = await fetch(FAL_BASE + model, {
+        method: 'POST',
+        headers: { Authorization: `Key ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, image_size: 'landscape_4_3', num_images: 1 }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`fal.ai 오류 (${res.status}): ${text.slice(0, 300)}`);
+      }
+      const data = await res.json();
+      return data.images[0].url;
+    }
+
+    // ========================================
+    // 🧩 Components
+    // ========================================
+    function KeyModal({ initial, onSave, onClose }) {
+      const [value, setValue] = useState(initial);
+      return (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-10">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <h2 className="text-lg font-bold">⚙️ fal.ai API 키</h2>
+            <p className="text-sm text-slate-500">
+              <a className="text-emerald-600 underline" href="https://fal.ai/dashboard/keys" target="_blank" rel="noreferrer">fal.ai 대시보드</a>에서 발급한 키를 붙여넣으세요.
+              키는 이 브라우저(localStorage)에만 저장됩니다.
+            </p>
+            <input
+              type="password" value={value} onChange={(e) => setValue(e.target.value)}
+              placeholder="xxxxxxxx-xxxx-....:xxxxxxxx"
+              className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            />
+            <div className="flex justify-end gap-2">
+              {initial && <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">취소</button>}
+              <button
+                onClick={() => onSave(value.trim())} disabled={!value.trim()}
+                className="px-4 py-2 rounded-lg bg-emerald-600 text-white disabled:opacity-40 hover:bg-emerald-700"
+              >저장</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [apiKey, setApiKey] = useState(loadKey);
+      const [showKey, setShowKey] = useState(!loadKey());
+      const [model, setModel] = useState(MODELS[0].id);
+      const [subject, setSubject] = useState(PRESETS[0].subject);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+      const [images, setImages] = useState([]); // { url, subject }
+
+      const handleGenerate = async () => {
+        if (!apiKey) { setShowKey(true); return; }
+        setLoading(true); setError('');
+        try {
+          const url = await generateImage({ apiKey, model, prompt: `${STYLE}. ${subject}` });
+          setImages((prev) => [{ url, subject }, ...prev]);
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+          <header className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-emerald-800">🌿 지브리풍 그림 공방</h1>
+              <p className="text-sm text-slate-500">fal.ai FLUX 로 지브리 느낌의 그림을 그려요</p>
+            </div>
+            <button onClick={() => setShowKey(true)} className="px-3 py-2 rounded-lg bg-white shadow hover:bg-slate-50 text-sm">⚙️ API 키</button>
+          </header>
+
+          <section className="bg-white/80 backdrop-blur rounded-2xl shadow p-5 space-y-4">
+            <div className="flex flex-wrap gap-2">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.label} onClick={() => setSubject(p.subject)}
+                  className={`px-3 py-1.5 rounded-full text-sm border ${subject === p.subject ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-emerald-50'}`}
+                >{p.label}</button>
+              ))}
+            </div>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-600">무엇을 그릴까요? (영어가 더 정확해요)</span>
+              <textarea
+                value={subject} onChange={(e) => setSubject(e.target.value)} rows={3}
+                className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+              />
+            </label>
+            <p className="text-xs text-slate-400">자동으로 붙는 스타일: {STYLE}</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <select value={model} onChange={(e) => setModel(e.target.value)} className="border rounded-lg px-3 py-2 bg-white">
+                {MODELS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+              <button
+                onClick={handleGenerate} disabled={loading || !subject.trim()}
+                className="px-5 py-2 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40 hover:bg-emerald-700"
+              >{loading ? '그리는 중…' : '🎨 그리기'}</button>
+            </div>
+            {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-3 break-all">{error}</p>}
+          </section>
+
+          {loading && (
+            <div className="flex flex-col items-center gap-3 py-8 text-emerald-700">
+              <div className="spinner" />
+              <span className="text-sm">숲의 정령이 그림을 그리고 있어요… (10~30초)</span>
+            </div>
+          )}
+
+          <section className="grid gap-5 sm:grid-cols-2">
+            {images.map((img, i) => (
+              <figure key={img.url} className="bg-white rounded-2xl shadow overflow-hidden">
+                <img src={img.url} alt={img.subject} className="w-full aspect-[4/3] object-cover" />
+                <figcaption className="p-3 flex items-start justify-between gap-2">
+                  <span className="text-xs text-slate-500 line-clamp-2">{img.subject}</span>
+                  <a href={img.url} target="_blank" rel="noreferrer" className="shrink-0 text-sm text-emerald-600 hover:underline">원본 열기</a>
+                </figcaption>
+              </figure>
+            ))}
+          </section>
+
+          {showKey && (
+            <KeyModal
+              initial={apiKey}
+              onSave={(k) => { saveKey(k); setApiKey(k); setShowKey(false); }}
+              onClose={() => setShowKey(false)}
+            />
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>15분 참치 김치볶음밥</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN은 버전을 명시적으로 고정한다. Babel 은 반드시 7.x (8.x는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes pop {
+      0% { transform: scale(0.96); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    .animate-pop { animation: pop 0.18s ease-out; }
+  </style>
+</head>
+<body class="bg-amber-50 text-stone-800">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useMemo, useCallback } = React;
+
+    // ========================================
+    // 📦 Recipe Data
+    // ========================================
+    const RECIPE = {
+      title: '15분 참치 김치볶음밥',
+      emoji: '🍳',
+      image: '../레시피북/images/thumbnail.png',
+      imageAlt: '센과 치히로 주인공이 김치볶음밥을 먹는 장면',
+      subtitle: '냉장고 속 재료로 금방 만드는 든든한 저녁 한 끼',
+      time: '15분',
+      difficulty: '쉬움',
+      baseServings: 1,
+      ingredients: {
+        주재료: [
+          { name: '밥', amount: 1, unit: '공기', note: '약 200g' },
+          { name: '잘 익은 김치', amount: 0.5, unit: '컵', note: '약 100g' },
+          { name: '참치캔', amount: 1, unit: '개', note: '100g, 기름 살짝 빼기' },
+          { name: '대파', amount: 0.33, unit: '대' },
+          { name: '달걀', amount: 1, unit: '개' },
+        ],
+        양념: [
+          { name: '식용유', amount: 1, unit: '큰술' },
+          { name: '고춧가루', amount: 0.5, unit: '큰술', note: '선택' },
+          { name: '간장', amount: 0.5, unit: '큰술' },
+          { name: '설탕', amount: 0.5, unit: '작은술' },
+          { name: '참기름', amount: 1, unit: '작은술' },
+          { name: '김가루 · 통깨', amount: null, unit: '', note: '약간' },
+        ],
+      },
+      steps: [
+        { title: '재료 손질', minutes: 2, desc: '김치는 가위로 잘게 자르고, 대파는 송송 썬다.' },
+        { title: '파기름 내기', minutes: 2, desc: '달군 팬에 식용유를 두르고 대파를 넣어 중불에서 향이 날 때까지 볶는다.' },
+        { title: '김치 볶기', minutes: 3, desc: '김치와 설탕을 넣고 김치가 살짝 투명해질 때까지 볶는다. 매콤한 맛을 원하면 고춧가루를 추가한다.' },
+        { title: '참치 넣기', minutes: 1, desc: '기름을 뺀 참치를 넣고 함께 볶는다.' },
+        { title: '밥 볶기', minutes: 4, desc: '밥을 넣고 주걱으로 눌러가며 고루 섞는다. 팬 가장자리에 간장을 둘러 눌린 향을 낸 뒤 섞는다.' },
+        { title: '달걀 프라이', minutes: 3, note: '밥 볶는 동안 동시에', desc: '다른 팬에 달걀 프라이를 반숙으로 부친다.' },
+        { title: '마무리', minutes: null, desc: '불을 끄고 참기름을 둘러 섞은 뒤 그릇에 담고, 달걀 프라이·김가루·통깨를 올린다.' },
+      ],
+      tips: [
+        { icon: '🍚', title: '찬밥 쓰기', text: '찬밥을 쓰면 밥알이 덜 뭉쳐서 더 고슬고슬해요.' },
+        { icon: '🍋', title: '덜 익은 김치', text: '김치가 덜 익었다면 식초 몇 방울을 넣으면 신맛이 살아나요.' },
+        { icon: '🧀', title: '치즈 변신', text: '치즈 한 장을 올리고 뚜껑을 덮어 1분 두면 치즈 김치볶음밥으로 변신!' },
+        { icon: '🥓', title: '참치 대체', text: '참치 대신 스팸, 베이컨, 소시지를 써도 좋아요.' },
+        { icon: '🌶️', title: '칠리소스 추가', text: '칠리소스를 추가해서 먹으니 맛있었다!', review: true },
+      ],
+    };
+
+    // ========================================
+    // 🛠️ Utils
+    // ========================================
+    const FRACTIONS = [
+      [0.25, '1/4'], [0.33, '1/3'], [0.5, '1/2'], [0.67, '2/3'], [0.75, '3/4'],
+    ];
+
+    // 0.5 → "1/2", 1.5 → "1 1/2", 150 → "150"
+    function formatAmount(value) {
+      if (value == null) return '';
+      if (value >= 10) return String(Math.round(value));
+      const whole = Math.floor(value);
+      const frac = value - whole;
+      if (frac < 0.05) return String(whole);
+      if (frac > 0.95) return String(whole + 1);
+      const match = FRACTIONS.find(([v]) => Math.abs(v - frac) < 0.05);
+      if (match) return whole > 0 ? `${whole} ${match[1]}` : match[1];
+      return String(Math.round(value * 10) / 10);
+    }
+
+    function formatTime(sec) {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled = false, onClick, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-amber-600 text-white hover:bg-amber-700 focus-visible:ring-amber-500',
+        secondary: 'bg-white text-stone-700 border border-stone-300 hover:bg-stone-50 focus-visible:ring-stone-400',
+        danger: 'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500',
+        ghost: 'bg-transparent text-stone-600 hover:bg-stone-100 focus-visible:ring-stone-400',
+      };
+      const sizes = {
+        sm: 'px-2.5 py-1 text-sm',
+        md: 'px-4 py-2 text-sm',
+        lg: 'px-5 py-3 text-base',
+      };
+      return (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Card({ className = '', children, ...rest }) {
+      return (
+        <section className={`bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-5 sm:p-6 ${className}`} {...rest}>
+          {children}
+        </section>
+      );
+    }
+
+    function Badge({ color = 'amber', className = '', children }) {
+      const colors = {
+        amber: 'bg-amber-100 text-amber-800',
+        green: 'bg-emerald-100 text-emerald-800',
+        stone: 'bg-stone-100 text-stone-700',
+      };
+      return (
+        <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-medium ${colors[color]} ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function ProgressBar({ value, max, label }) {
+      const pct = max === 0 ? 0 : Math.round((value / max) * 100);
+      return (
+        <div>
+          <div className="flex justify-between text-xs text-stone-500 mb-1">
+            <span>{label}</span>
+            <span>{value}/{max}</span>
+          </div>
+          <div className="h-2 rounded-full bg-stone-100 overflow-hidden" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
+            <div className="h-full bg-amber-500 transition-all duration-300" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, size = 'md', children }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+      }, [isOpen, onClose]);
+
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="modal-title"
+            className={`w-full ${sizes[size]} bg-white rounded-2xl shadow-xl p-6 animate-pop`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <h2 id="modal-title" className="text-lg font-bold">{title}</h2>
+              <Button variant="ghost" size="sm" onClick={onClose} aria-label="닫기">✕</Button>
+            </div>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Hero({ recipe }) {
+      const [imgFailed, setImgFailed] = useState(false);
+      return (
+        <header className="bg-gradient-to-br from-red-600 to-orange-600 text-white">
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 sm:py-14 text-center">
+            {recipe.image && !imgFailed ? (
+              <img
+                src={recipe.image}
+                alt={recipe.imageAlt}
+                onError={() => setImgFailed(true)}
+                className="mx-auto mb-5 w-full max-w-md aspect-video object-cover rounded-2xl shadow-lg ring-4 ring-white/30"
+              />
+            ) : (
+              <div className="text-6xl sm:text-7xl mb-4" aria-hidden="true">{recipe.emoji}</div>
+            )}
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">{recipe.title}</h1>
+            <p className="mt-3 text-amber-100 text-base sm:text-lg">{recipe.subtitle}</p>
+            <div className="mt-6 flex flex-wrap justify-center gap-2">
+              <Badge className="bg-white/20 text-white">⏱️ {recipe.time}</Badge>
+              <Badge className="bg-white/20 text-white">📊 난이도 {recipe.difficulty}</Badge>
+              <Badge className="bg-white/20 text-white">🍽️ {recipe.baseServings}인분 기준</Badge>
+            </div>
+          </div>
+        </header>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="text-center text-sm text-stone-400 py-8">
+          맛있게 드세요! 🥢
+        </footer>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Sections
+    // ========================================
+    function IngredientsSection({ recipe }) {
+      const [servings, setServings] = useState(recipe.baseServings);
+      const [checked, setChecked] = useState({});
+
+      const allItems = useMemo(() => Object.values(recipe.ingredients).flat(), [recipe]);
+      const checkedCount = allItems.filter((it) => checked[it.name]).length;
+      const ratio = servings / recipe.baseServings;
+
+      const toggle = (name) => setChecked((prev) => ({ ...prev, [name]: !prev[name] }));
+
+      return (
+        <Card aria-labelledby="ingredients-title">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h2 id="ingredients-title" className="text-xl font-bold">🥬 재료</h2>
+            <div className="flex items-center gap-2" role="group" aria-label="인분 조절">
+              <Button variant="secondary" size="sm" onClick={() => setServings((s) => s - 1)} disabled={servings <= 1} aria-label="인분 줄이기">−</Button>
+              <span className="w-14 text-center font-semibold" aria-live="polite">{servings}인분</span>
+              <Button variant="secondary" size="sm" onClick={() => setServings((s) => s + 1)} disabled={servings >= 6} aria-label="인분 늘리기">+</Button>
+            </div>
+          </div>
+
+          <ProgressBar value={checkedCount} max={allItems.length} label="준비한 재료" />
+
+          {Object.entries(recipe.ingredients).map(([group, items]) => (
+            <div key={group} className="mt-5">
+              <h3 className="text-sm font-semibold text-amber-700 mb-2">{group}</h3>
+              <ul className="divide-y divide-stone-100">
+                {items.map((it) => {
+                  const isChecked = !!checked[it.name];
+                  return (
+                    <li key={it.name}>
+                      <label className="flex items-center gap-3 py-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggle(it.name)}
+                          className="h-5 w-5 rounded border-stone-300 accent-amber-600"
+                        />
+                        <span className={`flex-1 ${isChecked ? 'line-through text-stone-400' : ''}`}>
+                          {it.name}
+                          {it.note && <span className="ml-1.5 text-xs text-stone-400">({it.note})</span>}
+                        </span>
+                        <span className={`font-medium tabular-nums ${isChecked ? 'text-stone-400' : 'text-stone-700'}`}>
+                          {it.amount != null ? `${formatAmount(it.amount * ratio)}${it.unit}` : ''}
+                        </span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+
+          {checkedCount > 0 && (
+            <div className="mt-4 text-right">
+              <Button variant="ghost" size="sm" onClick={() => setChecked({})}>체크 초기화</Button>
+            </div>
+          )}
+        </Card>
+      );
+    }
+
+    function StepTimer({ minutes, onDone }) {
+      const [remaining, setRemaining] = useState(minutes * 60);
+      const [running, setRunning] = useState(false);
+
+      useEffect(() => {
+        if (!running) return;
+        const id = setInterval(() => setRemaining((r) => Math.max(r - 1, 0)), 1000);
+        return () => clearInterval(id);
+      }, [running]);
+
+      useEffect(() => {
+        if (running && remaining === 0) {
+          setRunning(false);
+          onDone();
+        }
+      }, [running, remaining, onDone]);
+
+      const reset = () => { setRunning(false); setRemaining(minutes * 60); };
+      const finished = remaining === 0;
+
+      return (
+        <div className="flex items-center gap-2">
+          <span
+            className={`font-mono tabular-nums text-sm px-2 py-1 rounded-md ${finished ? 'bg-emerald-100 text-emerald-700' : running ? 'bg-amber-100 text-amber-800' : 'bg-stone-100 text-stone-600'}`}
+            aria-live="polite"
+            aria-label={`남은 시간 ${formatTime(remaining)}`}
+          >
+            {finished ? '완료!' : formatTime(remaining)}
+          </span>
+          {!finished && (
+            <Button variant="secondary" size="sm" onClick={() => setRunning((r) => !r)}>
+              {running ? '⏸ 일시정지' : '▶ 타이머'}
+            </Button>
+          )}
+          {(running || remaining !== minutes * 60) && (
+            <Button variant="ghost" size="sm" onClick={reset} aria-label="타이머 초기화">↺</Button>
+          )}
+        </div>
+      );
+    }
+
+    function StepsSection({ recipe }) {
+      const [done, setDone] = useState({});
+      const [toast, setToast] = useState(null);
+
+      const doneCount = recipe.steps.filter((_, i) => done[i]).length;
+      const allDone = doneCount === recipe.steps.length;
+
+      useEffect(() => {
+        if (!toast) return;
+        const id = setTimeout(() => setToast(null), 3000);
+        return () => clearTimeout(id);
+      }, [toast]);
+
+      const toggle = (i) => setDone((prev) => ({ ...prev, [i]: !prev[i] }));
+
+      // 단계별로 안정적인 콜백을 만들어 타이머 effect가 불필요하게 재시작되지 않도록 한다
+      const timerDoneHandlers = useMemo(
+        () => recipe.steps.map((s) => () => setToast(`⏰ "${s.title}" 시간이 다 됐어요!`)),
+        [recipe]
+      );
+
+      return (
+        <Card aria-labelledby="steps-title">
+          <h2 id="steps-title" className="text-xl font-bold mb-4">👩‍🍳 만드는 법</h2>
+          <ProgressBar value={doneCount} max={recipe.steps.length} label="진행 단계" />
+
+          <ol className="mt-5 space-y-4">
+            {recipe.steps.map((step, i) => {
+              const isDone = !!done[i];
+              return (
+                <li
+                  key={i}
+                  className={`rounded-xl border p-4 transition-colors ${isDone ? 'border-emerald-200 bg-emerald-50/60' : 'border-stone-200'}`}
+                >
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => toggle(i)}
+                      aria-pressed={isDone}
+                      aria-label={`${i + 1}단계 ${isDone ? '완료 취소' : '완료 표시'}`}
+                      className={`shrink-0 h-9 w-9 rounded-full font-bold flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${isDone ? 'bg-emerald-500 text-white' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}
+                    >
+                      {isDone ? '✓' : i + 1}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className={`font-semibold ${isDone ? 'text-stone-400 line-through' : ''}`}>{step.title}</h3>
+                        {step.minutes != null && <span className="text-xs text-stone-400">{step.minutes}분</span>}
+                        {step.note && <Badge color="stone" className="!py-0.5 !text-xs">{step.note}</Badge>}
+                      </div>
+                      <p className={`mt-1 text-sm leading-relaxed ${isDone ? 'text-stone-400' : 'text-stone-600'}`}>{step.desc}</p>
+                      {!isDone && step.minutes != null && (
+                        <div className="mt-3">
+                          <StepTimer minutes={step.minutes} onDone={timerDoneHandlers[i]} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+
+          {allDone && (
+            <div className="mt-6 rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-center animate-pop">
+              <p className="text-2xl mb-1">🎉</p>
+              <p className="font-semibold text-emerald-800">참치 김치볶음밥 완성! 노른자 톡 터뜨려 드세요.</p>
+              <Button variant="ghost" size="sm" className="mt-2" onClick={() => setDone({})}>처음부터 다시</Button>
+            </div>
+          )}
+
+          {toast && (
+            <div role="status" className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-stone-900 text-white text-sm px-4 py-3 rounded-xl shadow-lg animate-pop">
+              {toast}
+            </div>
+          )}
+        </Card>
+      );
+    }
+
+    function TipsSection({ tips }) {
+      const [selected, setSelected] = useState(null);
+      const close = useCallback(() => setSelected(null), []);
+
+      return (
+        <Card aria-labelledby="tips-title">
+          <h2 id="tips-title" className="text-xl font-bold mb-4">💡 응용 팁</h2>
+          <div className="grid grid-cols-2 gap-3">
+            {tips.map((tip) => (
+              <button
+                key={tip.title}
+                type="button"
+                onClick={() => setSelected(tip)}
+                className="rounded-xl border border-stone-200 p-4 text-left hover:border-amber-300 hover:bg-amber-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+              >
+                <span className="text-2xl" aria-hidden="true">{tip.icon}</span>
+                <span className="block mt-1 font-medium text-sm">{tip.title}</span>
+                {tip.review && <Badge color="green" className="mt-2 !py-0.5 !text-xs">직접 해본 후기</Badge>}
+              </button>
+            ))}
+          </div>
+
+          <Modal isOpen={!!selected} onClose={close} title={selected ? `${selected.icon} ${selected.title}` : ''} size="sm">
+            <p className="text-stone-600 leading-relaxed">{selected?.text}</p>
+            <div className="mt-6 text-right">
+              <Button onClick={close}>알겠어요</Button>
+            </div>
+          </Modal>
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return (
+        <div className="min-h-screen">
+          <Hero recipe={RECIPE} />
+          <main className="max-w-5xl mx-auto px-4 sm:px-6 -mt-6 grid gap-6 lg:grid-cols-5">
+            <div className="lg:col-span-2 space-y-6">
+              <IngredientsSection recipe={RECIPE} />
+              <TipsSection tips={RECIPE.tips} />
+            </div>
+            <div className="lg:col-span-3">
+              <StepsSection recipe={RECIPE} />
+            </div>
+          </main>
+          <Footer />
+        </div>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

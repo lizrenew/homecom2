@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>레시피북 포털</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { DEFAULT: '#03C75A', dark: '#02B350', light: '#E8F9EF' },
+            ink: { DEFAULT: '#222222', sub: '#505050', mute: '#767678', line: '#E3E5E8', bg: '#F5F6F7' },
+          },
+        },
+      },
+    };
+  </script>
+  <!-- ⚠️ 모든 CDN은 버전을 명시적으로 고정한다. Babel 은 반드시 7.x (8.x는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", sans-serif;
+      letter-spacing: -0.3px;
+    }
+    @keyframes fadeUp {
+      from { transform: translateY(4px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .animate-fade { animation: fadeUp 0.2s ease-out; }
+  </style>
+</head>
+<body class="bg-ink-bg text-ink">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useMemo, useCallback, useContext, createContext } = React;
+
+    // ========================================
+    // 📦 Recipe Data (레시피북 폴더의 md 파일 기반)
+    // ========================================
+    const CATEGORIES = [
+      { id: 'all', label: '전체', icon: '🍽️' },
+      { id: '한식', label: '한식', icon: '🍚' },
+      { id: '양식', label: '양식', icon: '🍝' },
+      { id: '중식', label: '중식', icon: '🥢' },
+      { id: 'soyfree', label: '대두프리', icon: '🌱' },
+      { id: 'quick', label: '15분요리', icon: '⚡' },
+    ];
+
+    const RECIPES = [
+      {
+        id: 'tuna-kimchi',
+        title: '15분 참치 김치볶음밥',
+        emoji: '🍳',
+        image: '../레시피북/images/thumbnail.png',
+        category: '한식',
+        tags: ['quick'],
+        servings: '1인분',
+        time: '15분',
+        difficulty: '쉬움',
+        summary: '냉장고 속 재료로 금방 만드는 든든한 저녁 한 끼',
+        allergy: [],
+        groups: [
+          { name: '주재료', items: ['밥 1공기 (약 200g)', '잘 익은 김치 1/2컵 (약 100g)', '참치캔 1개 (100g, 기름 살짝 빼기)', '대파 1/3대', '달걀 1개'] },
+          { name: '양념', items: ['식용유 1큰술', '고춧가루 1/2큰술 (선택)', '간장 1/2큰술', '설탕 1/2작은술', '참기름 1작은술', '김가루, 통깨 약간'] },
+        ],
+        steps: [
+          { title: '재료 손질 (2분)', desc: '김치는 가위로 잘게 자르고, 대파는 송송 썬다.' },
+          { title: '파기름 내기 (2분)', desc: '달군 팬에 식용유를 두르고 대파를 넣어 중불에서 향이 날 때까지 볶는다.' },
+          { title: '김치 볶기 (3분)', desc: '김치와 설탕을 넣고 김치가 살짝 투명해질 때까지 볶는다. 매콤한 맛을 원하면 고춧가루를 추가한다.' },
+          { title: '참치 넣기 (1분)', desc: '기름을 뺀 참치를 넣고 함께 볶는다.' },
+          { title: '밥 볶기 (4분)', desc: '밥을 넣고 주걱으로 눌러가며 고루 섞는다. 팬 가장자리에 간장을 둘러 눌린 향을 낸 뒤 섞는다.' },
+          { title: '달걀 프라이 (동시에 3분)', desc: '다른 팬에 달걀 프라이를 반숙으로 부친다.' },
+          { title: '마무리', desc: '불을 끄고 참기름을 둘러 섞은 뒤 그릇에 담고, 달걀 프라이·김가루·통깨를 올린다.' },
+        ],
+        tips: [
+          '찬밥을 쓰면 밥알이 덜 뭉쳐서 더 고슬고슬하다.',
+          '김치가 덜 익었다면 식초 몇 방울을 넣으면 신맛이 살아난다.',
+          '치즈 한 장을 올리고 뚜껑을 덮어 1분 두면 치즈 김치볶음밥으로 변신!',
+          '참치 대신 스팸, 베이컨, 소시지를 써도 좋다.',
+          '🌶️ 칠리소스를 추가해서 먹으니 맛있었다! (직접 해본 후기)',
+        ],
+      },
+      {
+        id: 'chili-shrimp',
+        title: '칠리새우 (대두 프리)',
+        emoji: '🦐',
+        category: '중식',
+        tags: ['soyfree'],
+        servings: '2~3인분',
+        time: '약 40분',
+        difficulty: '보통',
+        summary: '간장·두반장·대두유 없이 만드는 대두 알러지 안심 칠리새우',
+        allergy: [
+          { item: '간장', reason: '대두가 주원료', fix: '소금 + 액젓(성분표 확인) 또는 코코넛 아미노스' },
+          { item: '두반장', reason: '대부분 제품에 대두 포함', fix: '고춧가루 + 올리브오일로 고추기름 만들기' },
+          { item: '식용유(튀김용)', reason: '일반 식용유는 대부분 대두유', fix: '카놀라유·해바라기유·포도씨유·쌀겨유' },
+          { item: '스위트칠리소스', reason: '일부 제품에 대두 성분 가능', fix: '성분표 확인, 불확실하면 설탕·식초로 조절' },
+          { item: '케첩', reason: '대부분 문제 없으나 확인 권장', fix: '알러지 표시 확인' },
+          { item: '칵테일새우(가공)', reason: '일부 조미 제품에 첨가물 가능', fix: '생새우 또는 무첨가 냉동새우' },
+        ],
+        groups: [
+          { name: '새우 & 튀김옷', items: ['중새우 300g (생새우 또는 무첨가 냉동새우)', '전분(감자/옥수수) 4큰술', '달걀흰자 1개', '소금·후추·맛술 약간', '튀김용 기름: 카놀라유 또는 해바라기유'] },
+          { name: '칠리소스', items: ['케첩 4큰술', '스위트칠리소스 2큰술 (대두 없는 제품 확인)', '고춧가루 1작은술 (매운 맛 원하면 1큰술)', '설탕 1큰술, 식초 1큰술', '소금 한 꼬집 + 액젓 1/2작은술 (간장 대체)', '물 5큰술', '다진 마늘 1큰술, 다진 생강 약간, 다진 대파 3큰술', '전분물 (전분 1작은술 + 물 2큰술)'] },
+        ],
+        steps: [
+          { title: '새우 손질', desc: '껍질과 내장을 제거하고 키친타월로 물기를 꼼꼼히 닦은 뒤 소금·후추·맛술로 10분 밑간합니다.' },
+          { title: '튀김옷', desc: '새우에 달걀흰자를 버무린 뒤 전분을 골고루 입힙니다.' },
+          { title: '튀기기', desc: '170℃ 카놀라유에 2분 튀겨 건진 후, 180℃로 올려 30초~1분 한 번 더 튀깁니다.' },
+          { title: '고추기름 (두반장 대체)', desc: '팬에 카놀라유 1큰술을 두르고 약불에서 마늘·생강·대파 절반을 볶다가 고춧가루를 넣고 10초만 볶아 고추기름을 냅니다. (타지 않게 주의)' },
+          { title: '소스', desc: '케첩, 스위트칠리소스, 설탕, 식초, 소금, 액젓, 물을 넣고 끓입니다.' },
+          { title: '농도 맞추기', desc: '끓어오르면 전분물을 조금씩 넣어 농도를 맞춥니다.' },
+          { title: '버무리기', desc: '튀긴 새우를 넣고 센 불에서 30초 안에 빠르게 버무린 뒤 남은 대파를 뿌려 완성합니다.' },
+        ],
+        tips: [
+          '튀기기가 부담스러우면 새우에 카놀라유를 살짝 발라 에어프라이어 200℃에서 10~12분 구워도 됩니다.',
+          '외식이나 배달 칠리새우는 간장·두반장·대두유를 거의 항상 사용하니 주의하세요.',
+        ],
+      },
+      {
+        id: 'cream-pasta',
+        title: '베이컨 크림파스타 (대두 프리)',
+        emoji: '🍝',
+        category: '양식',
+        tags: ['soyfree'],
+        servings: '2인분',
+        time: '약 25분',
+        difficulty: '쉬움',
+        summary: '동물성 생크림과 자연치즈로 만드는 진한 크림파스타',
+        allergy: [
+          { item: '베이컨', reason: '국내 가공육에 분리대두단백이 들어가는 경우가 많음', fix: '성분표 확인, 또는 생삼겹살·통닭다리살' },
+          { item: '생크림', reason: '식물성 휘핑크림은 대두유·대두 레시틴 포함 가능', fix: '동물성 생크림(유크림 100%)' },
+          { item: '슬라이스 치즈', reason: '가공치즈에 대두 레시틴 포함 가능', fix: '사용하지 않음 (파마산 등 자연치즈)' },
+          { item: '버터', reason: '가공버터·마가린은 대두유 포함 가능', fix: '유크림 100% 버터' },
+          { item: '파스타면', reason: '일부 제품 공정상 혼입 가능', fix: '듀럼밀 100% 제품, 알러지 표시 확인' },
+        ],
+        groups: [
+          { name: '재료', items: ['스파게티면 200g (듀럼밀 100%)', '대두 성분 없는 베이컨 4~5줄 (또는 삼겹살 150g)', '양파 1/2개, 마늘 4쪽', '양송이버섯 4개', '동물성 생크림 200ml + 우유 200ml', '파마산 치즈 3큰술 (자연치즈)', '유크림 100% 버터 1큰술, 올리브오일 1큰술', '소금, 후추, 파슬리 약간'] },
+        ],
+        steps: [
+          { title: '면 삶기', desc: '끓는 물에 소금 1큰술을 넣고 면을 포장지 표기보다 1분 짧게 삶습니다. 면수 1컵은 따로 남겨둡니다.' },
+          { title: '재료 손질', desc: '베이컨은 2cm 폭, 양파는 채, 마늘은 편, 버섯은 슬라이스합니다.' },
+          { title: '볶기', desc: '팬에 올리브오일과 버터를 두르고 마늘을 약불에서 향이 나게 볶은 뒤 베이컨 → 양파 → 버섯 순으로 볶습니다.' },
+          { title: '소스', desc: '생크림과 우유를 붓고 중약불에서 가장자리가 보글보글 끓을 때까지 데웁니다. (센 불은 분리될 수 있어요)' },
+          { title: '합치기', desc: '삶은 면을 넣고 1~2분 졸이며 소스를 입힙니다. 너무 되직하면 면수를 조금씩 추가합니다.' },
+          { title: '마무리', desc: '불을 끄고 파마산 치즈, 소금, 후추로 간을 맞춘 뒤 파슬리를 뿌립니다.' },
+        ],
+        tips: [
+          '더 진하게 원하면 마지막에 달걀노른자 1개를 섞어주세요. (대두 무관)',
+          '생크림이 없을 때는 우유 400ml + 파마산 치즈를 늘리는 방식으로 대체하세요. 슬라이스 치즈 대체는 피하는 게 안전합니다.',
+        ],
+      },
+      {
+        id: 'pizza',
+        title: '홈메이드 피자 (대두 프리)',
+        emoji: '🍕',
+        category: '양식',
+        tags: ['soyfree'],
+        servings: '지름 28cm 1판',
+        time: '약 1시간 40분 (발효 포함)',
+        difficulty: '어려움',
+        summary: '도우와 소스까지 직접 만드는 대두 걱정 없는 피자',
+        allergy: [
+          { item: '페퍼로니', reason: '가공육에 대두단백·간장 성분이 들어가는 경우가 많음', fix: '대두 없는 제품, 또는 생햄·구운 닭가슴살' },
+          { item: '시판 토마토/피자소스', reason: '대두유가 들어간 제품이 있음', fix: '성분표 확인, 또는 직접 만든 소스' },
+          { item: '슈레드 치즈(혼합치즈)', reason: '식물성 유지(대두유)나 첨가물 포함 가능', fix: '자연치즈 100% 모차렐라' },
+          { item: '시판 도우·또띠아', reason: '대두유·대두 레시틴 포함 가능', fix: '직접 반죽' },
+          { item: '식용유', reason: '일반 식용유는 대부분 대두유', fix: '올리브오일만 사용' },
+        ],
+        groups: [
+          { name: '도우', items: ['강력분 250g', '미지근한 물 160ml', '인스턴트 드라이이스트 4g', '설탕 1작은술, 소금 1작은술', '올리브오일 1큰술'] },
+          { name: '간단 토마토소스', items: ['토마토 홀 통조림 200g (토마토·소금만 들어간 제품)', '다진 마늘 1작은술', '올리브오일 1큰술', '소금 약간, 설탕 1/2작은술, 오레가노 약간'] },
+          { name: '토핑', items: ['자연치즈 100% 모차렐라 200g', '대두 성분 없는 페퍼로니 10~15장 (또는 구운 닭가슴살)', '양파 1/4개, 피망 1/2개, 양송이버섯 3개', '블랙올리브 약간, 오레가노·파마산 치즈 약간'] },
+        ],
+        steps: [
+          { title: '반죽', desc: '미지근한 물에 이스트와 설탕을 풀고 5분 둡니다. 밀가루와 소금을 섞은 볼에 붓고 올리브오일을 넣어 10분 정도 매끈해질 때까지 치댑니다.' },
+          { title: '1차 발효', desc: '랩을 씌워 따뜻한 곳에서 약 1시간, 2배로 부풀 때까지 둡니다.' },
+          { title: '소스', desc: '팬에 올리브오일을 두르고 마늘을 볶다가 으깬 토마토를 넣어 10분 졸입니다. 소금·설탕·오레가노로 간합니다.' },
+          { title: '재료 손질', desc: '양파·피망은 얇게 채 썰고, 버섯과 올리브는 슬라이스합니다.' },
+          { title: '오븐 예열', desc: '250℃(최고 온도)로 15분 이상 예열합니다.' },
+          { title: '성형', desc: '가스를 빼고 둥글게 펴서 가장자리를 살짝 두껍게 만들고, 포크로 바닥에 구멍을 냅니다.' },
+          { title: '토핑', desc: '소스 → 치즈 절반 → 채소·페퍼로니 → 남은 치즈 순으로 올립니다.' },
+          { title: '굽기', desc: '250℃에서 10~12분, 치즈가 노릇해질 때까지 굽습니다.' },
+          { title: '마무리', desc: '오레가노와 파마산 치즈를 뿌려 마무리합니다.' },
+        ],
+        tips: [
+          '토핑은 수분이 적게 올려야 도우가 눅눅해지지 않습니다.',
+          '팬이나 오븐 트레이에 기름을 바를 때도 올리브오일을 사용하세요.',
+        ],
+      },
+    ];
+
+    // ========================================
+    // 🛠️ Utils
+    // ========================================
+    function matchesCategory(recipe, catId) {
+      if (catId === 'all') return true;
+      if (recipe.category === catId) return true;
+      return recipe.tags.includes(catId);
+    }
+
+    function searchRecipes(query) {
+      const q = query.trim().toLowerCase();
+      if (!q) return [];
+      return RECIPES.filter((r) => {
+        const haystack = [r.title, r.summary, r.category, ...r.groups.flatMap((g) => g.items)].join(' ').toLowerCase();
+        return haystack.includes(q);
+      });
+    }
+
+    const FAV_KEY = 'recipe-portal-favorites';
+    function loadFavorites() {
+      try { return JSON.parse(localStorage.getItem(FAV_KEY)) || []; } catch { return []; }
+    }
+    function saveFavorites(ids) {
+      try { localStorage.setItem(FAV_KEY, JSON.stringify(ids)); } catch { /* 저장 불가 환경은 무시 */ }
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled = false, onClick, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-brand text-white hover:bg-brand-dark',
+        secondary: 'bg-white text-ink-sub border border-ink-line hover:bg-ink-bg',
+        danger: 'bg-red-500 text-white hover:bg-red-600',
+        ghost: 'bg-transparent text-ink-mute hover:bg-ink-bg',
+      };
+      const sizes = { sm: 'px-2.5 py-1 text-xs', md: 'px-4 py-2 text-sm', lg: 'px-5 py-3.5 text-base' };
+      return (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-1 rounded-lg font-bold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 disabled:opacity-40 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Card({ title, action, className = '', children }) {
+      return (
+        <section className={`bg-white border border-ink-line rounded-xl ${className}`}>
+          {title && (
+            <div className="flex items-center justify-between px-5 pt-4 pb-3">
+              <h2 className="text-[15px] font-bold">{title}</h2>
+              {action}
+            </div>
+          )}
+          {children}
+        </section>
+      );
+    }
+
+    function Badge({ color = 'green', className = '', children }) {
+      const colors = {
+        green: 'bg-brand-light text-brand-dark',
+        gray: 'bg-ink-bg text-ink-mute',
+        red: 'bg-red-50 text-red-600',
+      };
+      return (
+        <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-bold ${colors[color]} ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Tabs({ items, value, onChange, className = '' }) {
+      return (
+        <div role="tablist" className={`flex gap-4 border-b border-ink-line px-5 overflow-x-auto ${className}`}>
+          {items.map((it) => {
+            const active = it.id === value;
+            return (
+              <button
+                key={it.id}
+                role="tab"
+                aria-selected={active}
+                onClick={() => onChange(it.id)}
+                className={`relative shrink-0 pb-2.5 text-sm transition-colors focus:outline-none focus-visible:text-brand ${active ? 'font-bold text-ink' : 'text-ink-mute hover:text-ink'}`}
+              >
+                {it.label}
+                {active && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-ink" />}
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, size = 'md', children }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+      }, [isOpen, onClose]);
+
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-2xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
+          <div role="dialog" aria-modal="true" aria-label={title} className={`w-full ${sizes[size]} bg-white rounded-xl shadow-xl animate-fade`} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-ink-line">
+              <h2 className="font-bold">{title}</h2>
+              <button onClick={onClose} aria-label="닫기" className="text-ink-mute hover:text-ink text-lg leading-none">✕</button>
+            </div>
+            <div className="p-5">{children}</div>
+          </div>
+        </div>
+      );
+    }
+
+    function SearchIcon({ className = '' }) {
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true">
+          <circle cx="10.5" cy="10.5" r="6.5" />
+          <path d="M15.5 15.5L21 21" />
+        </svg>
+      );
+    }
+
+    // ========================================
+    // 🔀 Router Components
+    // ========================================
+    const RouterContext = createContext(null);
+
+    function getPath() {
+      const hash = window.location.hash.replace(/^#/, '');
+      return hash || '/';
+    }
+
+    function Router({ children }) {
+      const [path, setPath] = useState(getPath);
+      useEffect(() => {
+        const onChange = () => { setPath(getPath()); window.scrollTo(0, 0); };
+        window.addEventListener('hashchange', onChange);
+        return () => window.removeEventListener('hashchange', onChange);
+      }, []);
+      const navigate = useCallback((to) => { window.location.hash = to; }, []);
+      return <RouterContext.Provider value={{ path, navigate, params: {} }}>{children}</RouterContext.Provider>;
+    }
+
+    function useRouter() {
+      return useContext(RouterContext);
+    }
+
+    function useParams() {
+      return useContext(RouterContext).params;
+    }
+
+    function matchRoute(pattern, path) {
+      if (pattern === '/*') return {}; // 나머지 전부 (404)
+      const p = pattern.split('/').filter(Boolean);
+      const s = path.split('/').filter(Boolean);
+      if (p.length !== s.length) return null;
+      const params = {};
+      for (let i = 0; i < p.length; i++) {
+        if (p[i].startsWith(':')) params[p[i].slice(1)] = decodeURIComponent(s[i]);
+        else if (p[i] !== s[i]) return null;
+      }
+      return params;
+    }
+
+    function Route() {
+      return null; // Routes 가 props 만 읽는다
+    }
+
+    function Routes({ children }) {
+      const router = useRouter();
+      for (const child of React.Children.toArray(children)) {
+        const params = matchRoute(child.props.path, router.path);
+        if (params) {
+          return <RouterContext.Provider value={{ ...router, params }}>{child.props.element}</RouterContext.Provider>;
+        }
+      }
+      return null;
+    }
+
+    function Link({ to, className = '', children, ...rest }) {
+      return <a href={`#${to}`} className={className} {...rest}>{children}</a>;
+    }
+
+    // ========================================
+    // 🧠 Favorites Context
+    // ========================================
+    const FavoritesContext = createContext(null);
+
+    function FavoritesProvider({ children }) {
+      const [ids, setIds] = useState(loadFavorites);
+      useEffect(() => saveFavorites(ids), [ids]);
+      const toggle = useCallback((id) => {
+        setIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+      }, []);
+      return <FavoritesContext.Provider value={{ ids, toggle }}>{children}</FavoritesContext.Provider>;
+    }
+
+    function useFavorites() {
+      return useContext(FavoritesContext);
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Logo({ size = 'lg' }) {
+      const sizes = { lg: 'text-4xl sm:text-5xl', sm: 'text-2xl' };
+      return (
+        <Link to="/" className={`font-black tracking-tighter text-brand ${sizes[size]}`} aria-label="레시피북 홈">
+          레시피북
+        </Link>
+      );
+    }
+
+    function SearchBar({ initial = '', compact = false }) {
+      const { navigate } = useRouter();
+      const [q, setQ] = useState(initial);
+      useEffect(() => setQ(initial), [initial]);
+
+      const submit = (e) => {
+        e.preventDefault();
+        if (q.trim()) navigate(`/search/${encodeURIComponent(q.trim())}`);
+      };
+
+      return (
+        <form onSubmit={submit} role="search" className={`flex items-center w-full bg-white border-2 border-brand ${compact ? 'h-11 rounded-lg' : 'h-14 sm:h-[60px] rounded-xl shadow-[0_2px_8px_rgba(3,199,90,0.15)]'}`}>
+          <label htmlFor={compact ? 'q-compact' : 'q'} className="sr-only">레시피 검색</label>
+          <input
+            id={compact ? 'q-compact' : 'q'}
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="레시피, 재료를 검색해 보세요"
+            className={`flex-1 min-w-0 bg-transparent outline-none px-4 ${compact ? 'text-[15px]' : 'text-lg font-bold placeholder:font-normal'} placeholder:text-[#929294]`}
+          />
+          <button type="submit" aria-label="검색" className={`shrink-0 text-brand hover:text-brand-dark ${compact ? 'px-3' : 'px-5'}`}>
+            <SearchIcon className={compact ? 'w-5 h-5' : 'w-7 h-7'} />
+          </button>
+        </form>
+      );
+    }
+
+    function TopLinks() {
+      const { ids } = useFavorites();
+      return (
+        <div className="flex justify-end gap-3 text-xs text-ink-mute">
+          <Link to="/" className="hover:underline">홈</Link>
+          <span aria-hidden="true">|</span>
+          <Link to="/favorites" className="hover:underline">즐겨찾기 <b className="text-brand">{ids.length}</b></Link>
+        </div>
+      );
+    }
+
+    function SubHeader({ query = '' }) {
+      return (
+        <header className="bg-white border-b border-ink-line sticky top-0 z-30">
+          <div className="max-w-[1130px] mx-auto px-4 py-3 flex items-center gap-4">
+            <Logo size="sm" />
+            <div className="flex-1 max-w-xl"><SearchBar initial={query} compact /></div>
+            <div className="hidden sm:block ml-auto"><TopLinks /></div>
+          </div>
+        </header>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="mt-10 border-t border-ink-line bg-white">
+          <div className="max-w-[1130px] mx-auto px-4 py-8 text-xs text-ink-mute space-y-2">
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              <span>레시피북 소개</span><span>이용약관</span><b className="text-ink-sub">개인정보처리방침</b><span>고객센터</span>
+            </div>
+            <p>© 레시피북 · week1 quests 레시피 모음</p>
+          </div>
+        </footer>
+      );
+    }
+
+    function RecipeThumb({ recipe, className = '' }) {
+      const [failed, setFailed] = useState(false);
+      if (recipe.image && !failed) {
+        return <img src={recipe.image} alt="" onError={() => setFailed(true)} className={`object-cover ${className}`} />;
+      }
+      return (
+        <div className={`flex items-center justify-center bg-gradient-to-br from-brand-light to-[#d5f3e1] ${className}`} aria-hidden="true">
+          <span className="text-4xl">{recipe.emoji}</span>
+        </div>
+      );
+    }
+
+    function FavButton({ id, className = '' }) {
+      const { ids, toggle } = useFavorites();
+      const on = ids.includes(id);
+      return (
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); toggle(id); }}
+          aria-pressed={on}
+          aria-label={on ? '즐겨찾기 해제' : '즐겨찾기 추가'}
+          className={`text-lg leading-none transition-transform hover:scale-110 ${on ? 'text-brand' : 'text-[#c5c8cd]'} ${className}`}
+        >
+          {on ? '★' : '☆'}
+        </button>
+      );
+    }
+
+    function RecipeListItem({ recipe }) {
+      return (
+        <li>
+          <Link to={`/recipe/${recipe.id}`} className="group flex gap-4 px-5 py-4 hover:bg-[#fafbfc]">
+            <RecipeThumb recipe={recipe} className="w-28 h-20 sm:w-36 sm:h-24 rounded-lg shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Badge color="gray">{recipe.category}</Badge>
+                {recipe.tags.includes('soyfree') && <Badge>대두프리</Badge>}
+                {recipe.tags.includes('quick') && <Badge color="red">15분</Badge>}
+              </div>
+              <h3 className="font-bold text-[15px] group-hover:underline truncate">{recipe.title}</h3>
+              <p className="mt-0.5 text-[13px] text-ink-sub line-clamp-2">{recipe.summary}</p>
+              <p className="mt-1 text-xs text-ink-mute">{recipe.servings} · {recipe.time} · 난이도 {recipe.difficulty}</p>
+            </div>
+            <FavButton id={recipe.id} className="self-start" />
+          </Link>
+        </li>
+      );
+    }
+
+    function EmptyState({ icon = '🍽️', title, desc, children }) {
+      return (
+        <div className="py-14 text-center">
+          <div className="text-4xl mb-3" aria-hidden="true">{icon}</div>
+          <p className="font-bold">{title}</p>
+          {desc && <p className="mt-1 text-sm text-ink-mute">{desc}</p>}
+          {children && <div className="mt-4">{children}</div>}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function HomePage() {
+      const [cat, setCat] = useState('all');
+      const [pick, setPick] = useState(null);
+      const { ids } = useFavorites();
+      const { navigate } = useRouter();
+
+      const list = useMemo(() => RECIPES.filter((r) => matchesCategory(r, cat)), [cat]);
+      const favRecipes = RECIPES.filter((r) => ids.includes(r.id));
+      const closePick = useCallback(() => setPick(null), []);
+
+      const rollPick = () => {
+        const others = RECIPES.filter((r) => r.id !== pick?.id);
+        setPick(others[Math.floor(Math.random() * others.length)]);
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col">
+          {/* 상단 검색 영역 */}
+          <header className="bg-white">
+            <div className="max-w-[1130px] mx-auto px-4 pt-3"><TopLinks /></div>
+            <div className="max-w-[700px] mx-auto px-4 pt-8 pb-6 flex flex-col items-center gap-6">
+              <Logo />
+              <SearchBar />
+            </div>
+
+            {/* 바로가기 아이콘 */}
+            <nav aria-label="카테고리 바로가기" className="max-w-[700px] mx-auto px-4 pb-8">
+              <ul className="grid grid-cols-3 sm:grid-cols-6 gap-y-4">
+                {CATEGORIES.map((c) => {
+                  const active = cat === c.id;
+                  return (
+                    <li key={c.id} className="flex justify-center">
+                      <button
+                        type="button"
+                        onClick={() => setCat(c.id)}
+                        aria-pressed={active}
+                        className="group flex flex-col items-center gap-1.5 focus:outline-none"
+                      >
+                        <span className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl border transition-colors group-focus-visible:ring-2 group-focus-visible:ring-brand ${active ? 'bg-brand-light border-brand' : 'bg-white border-ink-line group-hover:bg-ink-bg'}`}>
+                          {c.icon}
+                        </span>
+                        <span className={`text-[13px] ${active ? 'font-bold text-brand-dark' : 'text-ink-sub'}`}>{c.label}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </nav>
+          </header>
+
+          {/* 본문 2단 */}
+          <main className="flex-1 max-w-[1130px] w-full mx-auto px-4 pt-6 grid gap-5 lg:grid-cols-[1fr_350px]">
+            <Card
+              title={<>오늘의 레시피 <span className="text-brand">{list.length}</span></>}
+              action={<span className="text-xs text-ink-mute">week1 레시피북</span>}
+            >
+              <Tabs items={CATEGORIES} value={cat} onChange={setCat} />
+              {list.length === 0 ? (
+                <EmptyState title="이 카테고리엔 아직 레시피가 없어요" desc="다른 카테고리를 골라보세요." />
+              ) : (
+                <ul className="divide-y divide-ink-line">
+                  {list.map((r) => <RecipeListItem key={r.id} recipe={r} />)}
+                </ul>
+              )}
+            </Card>
+
+            <aside className="space-y-5">
+              {/* 로그인 박스 자리: 오늘 뭐 먹지 */}
+              <Card className="p-5">
+                <p className="text-[13px] text-ink-sub leading-relaxed">메뉴 고민될 땐<br /><b className="text-ink">레시피북이 골라드릴게요</b></p>
+                <Button size="lg" className="w-full mt-4" onClick={rollPick}>🎲 오늘 뭐 먹지?</Button>
+                <div className="mt-3 flex justify-center gap-3 text-xs text-ink-mute">
+                  <Link to="/favorites" className="hover:underline">즐겨찾기 {ids.length}</Link>
+                  <span aria-hidden="true">|</span>
+                  <Link to={`/category/soyfree`} className="hover:underline">대두프리 모아보기</Link>
+                </div>
+              </Card>
+
+              <Card title="⭐ 내 즐겨찾기">
+                {favRecipes.length === 0 ? (
+                  <p className="px-5 pb-5 text-[13px] text-ink-mute">☆ 를 눌러 자주 만드는 레시피를 저장해 보세요.</p>
+                ) : (
+                  <ul className="px-5 pb-4 space-y-2">
+                    {favRecipes.map((r) => (
+                      <li key={r.id}>
+                        <Link to={`/recipe/${r.id}`} className="flex items-center gap-2 text-sm hover:underline">
+                          <span aria-hidden="true">{r.emoji}</span><span className="truncate">{r.title}</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+
+              <Card title="🌱 대두 알러지 체크">
+                <ul className="px-5 pb-5 space-y-2 text-[13px] text-ink-sub">
+                  <li>· 일반 <b className="text-ink">식용유</b>는 대부분 대두유예요</li>
+                  <li>· <b className="text-ink">간장·두반장</b>은 대두가 주원료예요</li>
+                  <li>· 가공육·가공치즈는 <b className="text-ink">성분표</b>를 꼭 확인하세요</li>
+                </ul>
+              </Card>
+            </aside>
+          </main>
+          <Footer />
+
+          <Modal isOpen={!!pick} onClose={closePick} title="오늘의 추천 메뉴" size="sm">
+            {pick && (
+              <div className="text-center">
+                <RecipeThumb recipe={pick} className="w-full h-40 rounded-lg" />
+                <p className="mt-4 font-bold text-lg">{pick.title}</p>
+                <p className="mt-1 text-sm text-ink-mute">{pick.time} · {pick.servings}</p>
+                <div className="mt-5 grid grid-cols-2 gap-2">
+                  <Button variant="secondary" onClick={rollPick}>다시 고르기</Button>
+                  <Button onClick={() => { closePick(); navigate(`/recipe/${pick.id}`); }}>레시피 보기</Button>
+                </div>
+              </div>
+            )}
+          </Modal>
+        </div>
+      );
+    }
+
+    function ListPage({ title, query = '', recipes, empty }) {
+      return (
+        <div className="min-h-screen flex flex-col">
+          <SubHeader query={query} />
+          <main className="flex-1 max-w-[1130px] w-full mx-auto px-4 pt-6">
+            <Card title={<>{title} <span className="text-brand">{recipes.length}</span></>}>
+              {recipes.length === 0 ? empty : (
+                <ul className="divide-y divide-ink-line border-t border-ink-line">
+                  {recipes.map((r) => <RecipeListItem key={r.id} recipe={r} />)}
+                </ul>
+              )}
+            </Card>
+          </main>
+          <Footer />
+        </div>
+      );
+    }
+
+    function SearchPage() {
+      const { q } = useParams();
+      const results = useMemo(() => searchRecipes(q), [q]);
+      return (
+        <ListPage
+          title={<>'<span className="text-brand">{q}</span>' 검색결과</>}
+          query={q}
+          recipes={results}
+          empty={
+            <EmptyState icon="🔍" title={`'${q}'에 대한 검색결과가 없습니다.`} desc="단어의 철자를 확인하거나, 재료 이름(예: 김치, 새우, 치즈)으로 검색해 보세요.">
+              <Link to="/" className="text-sm text-brand font-bold hover:underline">홈으로 가기</Link>
+            </EmptyState>
+          }
+        />
+      );
+    }
+
+    function CategoryPage() {
+      const { id } = useParams();
+      const cat = CATEGORIES.find((c) => c.id === id);
+      const recipes = cat ? RECIPES.filter((r) => matchesCategory(r, id)) : [];
+      return (
+        <ListPage
+          title={cat ? `${cat.icon} ${cat.label}` : '카테고리'}
+          recipes={recipes}
+          empty={<EmptyState title="레시피가 없어요" />}
+        />
+      );
+    }
+
+    function FavoritesPage() {
+      const { ids } = useFavorites();
+      const recipes = RECIPES.filter((r) => ids.includes(r.id));
+      return (
+        <ListPage
+          title="⭐ 즐겨찾기"
+          recipes={recipes}
+          empty={
+            <EmptyState icon="☆" title="즐겨찾기한 레시피가 없어요" desc="레시피 옆 ☆ 를 눌러 추가해 보세요.">
+              <Link to="/" className="text-sm text-brand font-bold hover:underline">레시피 둘러보기</Link>
+            </EmptyState>
+          }
+        />
+      );
+    }
+
+    function RecipeDetailPage() {
+      const { id } = useParams();
+      const recipe = RECIPES.find((r) => r.id === id);
+      const [tab, setTab] = useState('ingredients');
+      const [done, setDone] = useState({});
+
+      useEffect(() => { setTab('ingredients'); setDone({}); }, [id]);
+
+      if (!recipe) {
+        return (
+          <div className="min-h-screen flex flex-col">
+            <SubHeader />
+            <main className="flex-1 max-w-[1130px] w-full mx-auto px-4 pt-6">
+              <Card><EmptyState icon="🤔" title="레시피를 찾을 수 없어요"><Link to="/" className="text-sm text-brand font-bold hover:underline">홈으로 가기</Link></EmptyState></Card>
+            </main>
+          </div>
+        );
+      }
+
+      const tabs = [
+        { id: 'ingredients', label: '재료' },
+        { id: 'steps', label: `만드는 법 ${recipe.steps.length}` },
+        ...(recipe.allergy.length ? [{ id: 'allergy', label: '⚠️ 알러지 체크' }] : []),
+        { id: 'tips', label: '💡 팁' },
+      ];
+      const doneCount = recipe.steps.filter((_, i) => done[i]).length;
+      const related = RECIPES.filter((r) => r.id !== recipe.id).slice(0, 3);
+
+      return (
+        <div className="min-h-screen flex flex-col">
+          <SubHeader />
+          <main className="flex-1 max-w-[1130px] w-full mx-auto px-4 pt-6 grid gap-5 lg:grid-cols-[1fr_350px]">
+            <div className="space-y-5 min-w-0">
+              <Card>
+                <div className="p-5 sm:flex gap-5">
+                  <RecipeThumb recipe={recipe} className="w-full sm:w-56 h-44 sm:h-40 rounded-lg shrink-0" />
+                  <div className="mt-4 sm:mt-0 flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <Badge color="gray">{recipe.category}</Badge>
+                      {recipe.tags.includes('soyfree') && <Badge>대두프리</Badge>}
+                    </div>
+                    <div className="mt-2 flex items-start gap-2">
+                      <h1 className="text-xl sm:text-2xl font-bold flex-1">{recipe.title}</h1>
+                      <FavButton id={recipe.id} className="text-2xl" />
+                    </div>
+                    <p className="mt-1 text-sm text-ink-sub">{recipe.summary}</p>
+                    <dl className="mt-4 grid grid-cols-3 border border-ink-line rounded-lg text-center divide-x divide-ink-line">
+                      {[['분량', recipe.servings], ['시간', recipe.time], ['난이도', recipe.difficulty]].map(([k, v]) => (
+                        <div key={k} className="py-2.5 px-1">
+                          <dt className="text-[11px] text-ink-mute">{k}</dt>
+                          <dd className="text-[13px] font-bold mt-0.5">{v}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                </div>
+              </Card>
+
+              <Card>
+                <Tabs items={tabs} value={tab} onChange={setTab} className="pt-4" />
+                <div className="p-5 animate-fade" key={tab}>
+                  {tab === 'ingredients' && recipe.groups.map((g) => (
+                    <div key={g.name} className="mb-5 last:mb-0">
+                      <h3 className="text-sm font-bold text-brand-dark mb-2">{g.name}</h3>
+                      <ul className="grid sm:grid-cols-2 gap-x-6">
+                        {g.items.map((it) => (
+                          <li key={it} className="py-2 border-b border-dashed border-ink-line text-sm">{it}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+
+                  {tab === 'steps' && (
+                    <>
+                      <p className="text-xs text-ink-mute mb-3">단계를 누르면 완료 표시돼요 · <b className="text-brand">{doneCount}</b>/{recipe.steps.length}</p>
+                      <ol className="space-y-2">
+                        {recipe.steps.map((s, i) => {
+                          const on = !!done[i];
+                          return (
+                            <li key={i}>
+                              <button
+                                type="button"
+                                onClick={() => setDone((d) => ({ ...d, [i]: !d[i] }))}
+                                aria-pressed={on}
+                                className={`w-full flex gap-3 text-left p-3 rounded-lg border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand ${on ? 'border-brand bg-brand-light' : 'border-ink-line hover:bg-ink-bg'}`}
+                              >
+                                <span className={`shrink-0 w-7 h-7 rounded-full text-xs font-bold flex items-center justify-center ${on ? 'bg-brand text-white' : 'bg-ink-bg text-ink-sub'}`}>{on ? '✓' : i + 1}</span>
+                                <span className="min-w-0">
+                                  <span className={`block text-sm font-bold ${on ? 'text-ink-mute line-through' : ''}`}>{s.title}</span>
+                                  <span className={`block text-[13px] mt-0.5 leading-relaxed ${on ? 'text-ink-mute' : 'text-ink-sub'}`}>{s.desc}</span>
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                      {doneCount === recipe.steps.length && (
+                        <p className="mt-4 text-center text-sm font-bold text-brand-dark animate-fade">🎉 완성! 맛있게 드세요.</p>
+                      )}
+                    </>
+                  )}
+
+                  {tab === 'allergy' && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[13px] min-w-[480px]">
+                        <thead>
+                          <tr className="bg-ink-bg text-ink-sub">
+                            <th scope="col" className="text-left font-bold p-2.5">재료</th>
+                            <th scope="col" className="text-left font-bold p-2.5">주의 이유</th>
+                            <th scope="col" className="text-left font-bold p-2.5">대체 방법</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-ink-line">
+                          {recipe.allergy.map((a) => (
+                            <tr key={a.item}>
+                              <td className="p-2.5 font-bold whitespace-nowrap">{a.item}</td>
+                              <td className="p-2.5 text-red-600">{a.reason}</td>
+                              <td className="p-2.5 text-ink-sub">{a.fix}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {tab === 'tips' && (
+                    <ul className="space-y-2">
+                      {recipe.tips.map((t) => (
+                        <li key={t} className="flex gap-2 text-sm bg-ink-bg rounded-lg p-3">
+                          <span aria-hidden="true">💡</span><span>{t}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </Card>
+            </div>
+
+            <aside className="space-y-5">
+              <Card title="함께 보면 좋은 레시피">
+                <ul className="divide-y divide-ink-line border-t border-ink-line">
+                  {related.map((r) => (
+                    <li key={r.id}>
+                      <Link to={`/recipe/${r.id}`} className="flex items-center gap-3 px-5 py-3 hover:bg-[#fafbfc]">
+                        <RecipeThumb recipe={r} className="w-14 h-14 rounded-lg shrink-0" />
+                        <span className="min-w-0">
+                          <span className="block text-sm font-bold truncate">{r.title}</span>
+                          <span className="block text-xs text-ink-mute">{r.time}</span>
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+              <Link to="/" className="block text-center text-sm text-ink-mute hover:underline">← 홈으로</Link>
+            </aside>
+          </main>
+          <Footer />
+        </div>
+      );
+    }
+
+    function NotFoundPage() {
+      return (
+        <div className="min-h-screen flex flex-col">
+          <SubHeader />
+          <main className="flex-1 max-w-[1130px] w-full mx-auto px-4 pt-6">
+            <Card><EmptyState icon="🧭" title="페이지를 찾을 수 없어요"><Link to="/" className="text-sm text-brand font-bold hover:underline">홈으로 가기</Link></EmptyState></Card>
+          </main>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return (
+        <Router>
+          <FavoritesProvider>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/recipe/:id" element={<RecipeDetailPage />} />
+              <Route path="/search/:q" element={<SearchPage />} />
+              <Route path="/category/:id" element={<CategoryPage />} />
+              <Route path="/favorites" element={<FavoritesPage />} />
+              <Route path="/*" element={<NotFoundPage />} />
+            </Routes>
+          </FavoritesProvider>
+        </Router>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

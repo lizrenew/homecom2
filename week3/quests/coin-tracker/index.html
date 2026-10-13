@@ -1,0 +1,755 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>나만의 코인 대시보드</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap" />
+<style>
+  /* 레이아웃: 상단 요약 스트립(내 자산·손익·시장 분위기) → 도구줄(코인 추가·정렬) → 코인 카드 그리드 */
+  :root {
+    --bg: #0d1014;
+    --surface: #151a20;
+    --surface-2: #1c222a;
+    --line: #27303a;
+    --text: #e6ebf0;
+    --muted: #8a96a3;
+    --accent: #5b9dff;
+    --up: #1fc77e;
+    --up-soft: rgba(31, 199, 126, 0.14);
+    --down: #f0465a;
+    --down-soft: rgba(240, 70, 90, 0.14);
+    --font-body: "IBM Plex Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    --font-num: "JetBrains Mono", ui-monospace, Consolas, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f3f5f8; --surface: #ffffff; --surface-2: #eef1f5; --line: #dde3ea;
+      --text: #141a21; --muted: #5d6874; --accent: #2f6fe0;
+      --up: #0f9d5c; --up-soft: rgba(15, 157, 92, 0.1);
+      --down: #d42f45; --down-soft: rgba(212, 47, 69, 0.1);
+      color-scheme: light;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-body); font-size: 14px; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; display: grid; gap: 18px; }
+  .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+  button, select, input { font: inherit; color: var(--text); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ── 헤더 ── */
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between; }
+  h1 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
+  .status { margin-top: 4px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--up); }
+  .status.error { color: var(--down); }
+  .status.error .dot { background: var(--down); }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn, select {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 12px; cursor: pointer;
+  }
+  .btn:hover, select:hover { border-color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { background: var(--surface); border: 0; padding: 7px 12px; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  #refresh .icon { display: inline-block; }
+  #refresh.loading .icon { animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .progress { height: 2px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width 0.25s linear; }
+
+  /* ── 요약 스트립 ── */
+  .summary { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+  .stat .label { font-size: 12px; color: var(--muted); letter-spacing: 0.02em; }
+  .stat .value { font-size: 22px; font-weight: 700; margin-top: 6px; overflow-wrap: anywhere; }
+  .stat .sub { font-size: 12px; margin-top: 4px; color: var(--muted); }
+  .stat .value.up, .stat .sub.up { color: var(--up); }
+  .stat .value.down, .stat .sub.down { color: var(--down); }
+  .breadth { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 10px; background: var(--line); }
+  .breadth .u { background: var(--up); }
+  .breadth .d { background: var(--down); }
+
+  /* ── TOP 10 ── */
+  .top10 { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
+  .top10-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; justify-content: space-between; margin-bottom: 10px; }
+  .top10 h2 { margin: 0; font-size: 16px; }
+  .top10-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .table-wrap { overflow-x: auto; }
+  .top10 table { width: 100%; border-collapse: collapse; min-width: 560px; }
+  .top10 th { font-size: 12px; font-weight: 500; color: var(--muted); text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .top10 td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .top10 tbody tr:last-child td { border-bottom: 0; }
+  .top10 tbody tr:hover { background: var(--surface-2); }
+  .top10 .r { text-align: right; }
+  .c-no { width: 36px; color: var(--muted); font-family: var(--font-num); }
+  .c-rank { width: 64px; color: var(--muted); }
+  .c-add { width: 70px; text-align: right; }
+  .c-pct { width: 34%; }
+  .t-coin { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .t-coin img { width: 20px; height: 20px; flex: none; }
+  .t-coin .t-sym { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+  .pct-cell { display: flex; align-items: center; gap: 8px; }
+  .pct-cell .bar { flex: 1; height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+  .pct-cell .bar > i { display: block; height: 100%; border-radius: 3px; }
+  .pct-cell .v { width: 76px; text-align: right; font-weight: 700; font-family: var(--font-num); }
+  tr.up .v { color: var(--up); }  tr.up .bar > i { background: var(--up); }
+  tr.down .v { color: var(--down); } tr.down .bar > i { background: var(--down); }
+  .t-add {
+    background: none; border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px;
+    font-size: 12px; cursor: pointer; color: var(--text);
+  }
+  .t-add:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .t-add:disabled { color: var(--muted); cursor: default; border-style: dashed; }
+  .t-empty { text-align: center; color: var(--muted); padding: 24px 8px !important; }
+
+  /* ── 도구줄 ── */
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+  .toolbar { align-items: flex-end; }
+  .search { position: relative; flex: 1 1 300px; max-width: 520px; margin: 0; }
+  .add-label { display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.02em; }
+  .add-row { display: flex; gap: 8px; }
+  .search input {
+    flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font-size: 15px;
+  }
+  .add-btn { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; white-space: nowrap; }
+  .add-btn:hover { filter: brightness(1.1); }
+  .search input:focus { border-color: var(--accent); outline: none; }
+  .results {
+    position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; right: 0;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); overflow: hidden;
+  }
+  .results button {
+    display: flex; width: 100%; gap: 10px; align-items: center; text-align: left;
+    background: none; border: 0; padding: 9px 12px; cursor: pointer;
+  }
+  .results button:hover:not(:disabled) { background: var(--surface-2); }
+  .results button:disabled { opacity: 0.5; cursor: default; }
+  .results img { width: 20px; height: 20px; }
+  .results .r-sym { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+  .results .r-tag { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .results .r-empty { padding: 10px 12px; color: var(--muted); }
+  .sort { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
+
+  /* ── 코인 카드 ── */
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+  .card {
+    position: relative; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px; display: grid; gap: 10px; min-width: 0;
+  }
+  .card.flash-up { animation: flashUp 1.2s ease-out; }
+  .card.flash-down { animation: flashDown 1.2s ease-out; }
+  @keyframes flashUp { from { background: var(--up-soft); } to { background: var(--surface); } }
+  @keyframes flashDown { from { background: var(--down-soft); } to { background: var(--surface); } }
+  .top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .top img { width: 30px; height: 30px; flex: none; }
+  .top .names { min-width: 0; }
+  .name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sym { font-size: 12px; color: var(--muted); text-transform: uppercase; }
+  .rank { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .remove {
+    background: none; border: 0; color: var(--muted); cursor: pointer;
+    font-size: 16px; line-height: 1; padding: 2px 4px; border-radius: 4px;
+  }
+  .remove:hover { color: var(--down); background: var(--down-soft); }
+  .price-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px; }
+  .price { font-size: 22px; font-weight: 700; }
+  .change { font-size: 13px; font-weight: 700; padding: 3px 8px; border-radius: 6px; }
+  .card.up .price, .card.up .change { color: var(--up); }
+  .card.up .change { background: var(--up-soft); }
+  .card.down .price, .card.down .change { color: var(--down); }
+  .card.down .change { background: var(--down-soft); }
+  .spark { width: 100%; height: 48px; display: block; }
+  .spark-label { font-size: 11px; color: var(--muted); margin-top: -6px; }
+  .meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; font-size: 12px; color: var(--muted); }
+  .meta span { white-space: nowrap; }
+  .hold {
+    display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px dashed var(--line);
+    font-size: 12px; color: var(--muted);
+  }
+  .hold input {
+    width: 100px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 5px 8px; font-family: var(--font-num);
+  }
+  .hold input:focus { border-color: var(--accent); outline: none; }
+  .hold .worth { margin-left: auto; color: var(--text); font-weight: 700; }
+
+  .skeleton { min-height: 230px; background: linear-gradient(90deg, var(--surface), var(--surface-2), var(--surface)); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  .empty { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 48px 16px; border: 1px dashed var(--line); border-radius: 12px; }
+
+  footer { font-size: 12px; color: var(--muted); line-height: 1.6; }
+  footer a { color: var(--muted); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>나만의 코인 대시보드</h1>
+      <div id="status" class="status"><span class="dot"></span><span id="status-text">불러오는 중…</span></div>
+    </div>
+    <div class="controls">
+      <div class="seg" id="currency" role="group" aria-label="표시 통화">
+        <button data-cur="krw">KRW</button>
+        <button data-cur="usd">USD</button>
+      </div>
+      <select id="interval" aria-label="자동 갱신 주기">
+        <option value="0">자동 갱신 끄기</option>
+        <option value="30">30초마다 갱신</option>
+        <option value="60">1분마다 갱신</option>
+        <option value="300">5분마다 갱신</option>
+      </select>
+      <button id="refresh" class="btn"><span class="icon">⟳</span> 새로고침</button>
+    </div>
+  </header>
+  <div class="progress"><div id="bar"></div></div>
+
+  <section class="summary" aria-label="요약">
+    <div class="stat">
+      <div class="label">내 자산 평가액</div>
+      <div id="s-total" class="value num">-</div>
+      <div id="s-total-sub" class="sub">카드 아래에 보유 수량을 입력하면 계산돼요</div>
+    </div>
+    <div class="stat">
+      <div class="label">24시간 손익</div>
+      <div id="s-pl" class="value num">-</div>
+      <div id="s-pl-sub" class="sub num"></div>
+    </div>
+    <div class="stat">
+      <div class="label">관심 코인 분위기 (24h)</div>
+      <div id="s-breadth" class="value">-</div>
+      <div class="breadth"><div id="b-up" class="u"></div><div id="b-down" class="d"></div></div>
+    </div>
+    <div class="stat">
+      <div class="label">가장 많이 오른 / 내린 코인</div>
+      <div id="s-best" class="sub up num" style="font-size:14px;margin-top:8px">-</div>
+      <div id="s-worst" class="sub down num" style="font-size:14px">-</div>
+    </div>
+  </section>
+
+  <section class="top10" aria-labelledby="top-title">
+    <div class="top10-head">
+      <div>
+        <h2 id="top-title">오늘의 등락률 TOP 10</h2>
+        <div class="top10-sub">시가총액 상위 250개 코인 중 · 최근 24시간 기준</div>
+      </div>
+      <div class="seg" id="top-mode" role="group" aria-label="TOP 10 종류">
+        <button data-mode="gainers">상승 TOP 10</button>
+        <button data-mode="losers">하락 TOP 10</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th class="c-no">#</th><th>코인</th><th class="r">현재가</th><th class="c-pct">24h 등락률</th><th class="r c-rank">시총</th><th class="c-add"></th></tr>
+        </thead>
+        <tbody id="top-body">
+          <tr><td colspan="6" class="t-empty">불러오는 중…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="toolbar">
+    <form class="search" id="add-form">
+      <label for="search" class="add-label">관심 코인 추가</label>
+      <div class="add-row">
+        <input id="search" type="search" placeholder="코인 이름이나 심볼 입력 (예: 에이다, cardano, TRX)" autocomplete="off" />
+        <button type="submit" class="btn add-btn">+ 추가</button>
+      </div>
+      <div id="results" class="results" hidden></div>
+    </form>
+    <label class="sort">정렬
+      <select id="sort">
+        <option value="rank">시가총액 순</option>
+        <option value="change">24h 상승률 순</option>
+        <option value="worth">내 평가액 순</option>
+        <option value="name">이름 순</option>
+      </select>
+    </label>
+  </div>
+
+  <main id="grid" class="grid"></main>
+
+  <footer>
+    데이터: <a href="https://www.coingecko.com" target="_blank" rel="noopener">CoinGecko</a> 무료 API ·
+    KRW 가격은 글로벌 평균을 원화로 환산한 값이라 국내 거래소 가격과 조금 다를 수 있어요.
+    관심 코인과 보유 수량은 이 브라우저에만 저장돼요.
+  </footer>
+</div>
+
+<script>
+  const API = "https://api.coingecko.com/api/v3";
+  const DEFAULT_WATCHLIST = ["bitcoin", "ethereum", "ripple", "solana", "dogecoin"];
+  const $ = (id) => document.getElementById(id);
+
+  // ── 브라우저 저장소 (막혀 있어도 동작하도록 try/catch) ──
+  const store = {
+    get(key, fallback) {
+      try {
+        const v = localStorage.getItem("coinDash." + key);
+        return v == null ? fallback : JSON.parse(v);
+      } catch { return fallback; }
+    },
+    set(key, value) {
+      try { localStorage.setItem("coinDash." + key, JSON.stringify(value)); } catch {}
+    },
+  };
+
+  let watchlist = store.get("watchlist", DEFAULT_WATCHLIST);
+  let holdings = store.get("holdings", {});      // { coinId: 수량 }
+  let currency = store.get("currency", "krw");
+  let sortBy = store.get("sort", "rank");
+  let coins = [];                                 // 마지막으로 받은 시세
+  let lastPrices = {};                            // 가격이 바뀐 카드를 깜빡이기 위한 직전 가격
+  let market = [];                                // TOP 10 계산용 시총 상위 250개
+  let topMode = store.get("topMode", "gainers");
+  let loading = false;
+  let timer = null, barTimer = null;
+
+  $("interval").value = String(store.get("refreshSec", 30));
+  document.querySelectorAll("#top-mode button").forEach((b) => b.classList.toggle("on", b.dataset.mode === topMode));
+  $("sort").value = sortBy;
+  document.querySelectorAll("#currency button").forEach((b) => b.classList.toggle("on", b.dataset.cur === currency));
+
+  // ── 포맷 ──
+  function fmtPrice(n) {
+    if (n == null || Number.isNaN(n)) return "-";
+    const krw = currency === "krw";
+    const abs = Math.abs(n);
+    const digits = krw ? (abs < 100 ? 2 : 0) : (abs < 1 ? 5 : 2);
+    return new Intl.NumberFormat(krw ? "ko-KR" : "en-US", {
+      style: "currency", currency: krw ? "KRW" : "USD",
+      minimumFractionDigits: 0, maximumFractionDigits: digits,
+    }).format(n);
+  }
+  const fmtSigned = (n) => (n > 0 ? "+" : n < 0 ? "−" : "") + fmtPrice(Math.abs(n));
+  const fmtPct = (p) => `${p >= 0 ? "▲" : "▼"} ${Math.abs(p).toFixed(2)}%`;
+  const pctOf = (c) => c.price_change_percentage_24h ?? 0;
+  const worthOf = (c) => (holdings[c.id] || 0) * (c.current_price || 0);
+
+  // ── 7일 스파크라인 ──
+  function sparkline(prices, up) {
+    if (!prices || prices.length < 2) return "";
+    const w = 240, h = 48, pad = 4;
+    const min = Math.min(...prices), max = Math.max(...prices);
+    const range = max - min || 1;
+    const xy = prices.map((p, i) => [i / (prices.length - 1) * w, h - pad - (p - min) / range * (h - pad * 2)]);
+    const line = xy.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+    const color = up ? "var(--up)" : "var(--down)";
+    const gid = "g" + Math.random().toString(36).slice(2, 8);
+    const [ex, ey] = xy[xy.length - 1];
+    return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+      <defs><linearGradient id="${gid}" x1="0" x2="0" y1="0" y2="1">
+        <stop offset="0" stop-color="${color}" stop-opacity="0.28"/><stop offset="1" stop-color="${color}" stop-opacity="0"/>
+      </linearGradient></defs>
+      <polygon points="0,${h} ${line} ${w},${h}" fill="url(#${gid})"/>
+      <polyline points="${line}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+      <circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="2.5" fill="${color}"/>
+    </svg>`;
+  }
+
+  // ── 카드 ──
+  function createCard(c) {
+    const el = document.createElement("article");
+    el.className = "card";
+    el.dataset.id = c.id;
+    el.innerHTML = `
+      <div class="top">
+        <img alt="" loading="lazy" />
+        <div class="names"><div class="name"></div><div class="sym"></div></div>
+        <span class="rank num"></span>
+        <button class="remove" title="관심 코인에서 빼기" aria-label="관심 코인에서 빼기">×</button>
+      </div>
+      <div class="price-row"><span class="price num"></span><span class="change num"></span></div>
+      <div class="spark-wrap"></div>
+      <div class="spark-label">최근 7일</div>
+      <div class="meta num"><span class="low"></span><span class="high"></span></div>
+      <label class="hold">보유
+        <input type="number" min="0" step="any" inputmode="decimal" placeholder="0" />
+        <span class="worth num"></span>
+      </label>`;
+    el.querySelector("img").src = c.image;
+    el.querySelector(".name").textContent = c.name;
+    el.querySelector(".sym").textContent = c.symbol;
+    const qty = el.querySelector(".hold input");
+    qty.id = "qty-" + c.id;
+    if (holdings[c.id]) qty.value = holdings[c.id];
+    qty.addEventListener("input", () => {
+      const v = parseFloat(qty.value);
+      if (v > 0) holdings[c.id] = v; else delete holdings[c.id];
+      store.set("holdings", holdings);
+      const coin = coins.find((x) => x.id === c.id);
+      if (coin) updateCard(el, coin, false);
+      renderSummary();
+    });
+    el.querySelector(".remove").addEventListener("click", () => removeCoin(c.id));
+    return el;
+  }
+
+  function updateCard(el, c, withFlash = true) {
+    const up = pctOf(c) >= 0;
+    el.classList.toggle("up", up);
+    el.classList.toggle("down", !up);
+    if (withFlash) {
+      const prev = lastPrices[c.id];
+      if (prev != null && prev !== c.current_price) {
+        el.classList.remove("flash-up", "flash-down");
+        void el.offsetWidth; // 애니메이션 재시작
+        el.classList.add(c.current_price > prev ? "flash-up" : "flash-down");
+      }
+    }
+    el.querySelector(".rank").textContent = c.market_cap_rank ? "#" + c.market_cap_rank : "";
+    el.querySelector(".price").textContent = fmtPrice(c.current_price);
+    el.querySelector(".change").textContent = fmtPct(pctOf(c));
+    el.querySelector(".spark-wrap").innerHTML = sparkline(c.sparkline_in_7d?.price, up);
+    el.querySelector(".low").textContent = "24h 저 " + fmtPrice(c.low_24h);
+    el.querySelector(".high").textContent = "고 " + fmtPrice(c.high_24h);
+    const worth = worthOf(c);
+    el.querySelector(".worth").textContent = worth ? fmtPrice(worth) : "";
+  }
+
+  function sortedCoins() {
+    const arr = [...coins];
+    if (sortBy === "change") arr.sort((a, b) => pctOf(b) - pctOf(a));
+    else if (sortBy === "worth") arr.sort((a, b) => worthOf(b) - worthOf(a));
+    else if (sortBy === "name") arr.sort((a, b) => a.name.localeCompare(b.name));
+    else arr.sort((a, b) => (a.market_cap_rank ?? 1e9) - (b.market_cap_rank ?? 1e9));
+    return arr;
+  }
+
+  // 카드를 통째로 다시 그리지 않고 제자리에서 갱신 — 보유 수량 입력 중에도 포커스가 유지됨
+  function renderCards(withFlash = true) {
+    const grid = $("grid");
+    if (!watchlist.length) {
+      grid.innerHTML = `<div class="empty">관심 코인이 비어 있어요. 위 검색창에서 코인을 추가해 보세요.</div>`;
+      return;
+    }
+    const list = sortedCoins();
+    const keep = new Set(list.map((c) => c.id));
+    [...grid.children].forEach((el) => { if (!keep.has(el.dataset.id)) el.remove(); });
+    list.forEach((c, i) => {
+      let el = [...grid.children].find((x) => x.dataset.id === c.id);
+      if (!el) el = createCard(c);
+      updateCard(el, c, withFlash);
+      if (grid.children[i] !== el) grid.insertBefore(el, grid.children[i] || null);
+    });
+  }
+
+  function renderSummary() {
+    // 내 자산
+    const held = coins.filter((c) => holdings[c.id] > 0);
+    if (held.length) {
+      const total = held.reduce((s, c) => s + worthOf(c), 0);
+      const pl = held.reduce((s, c) => s + holdings[c.id] * (c.price_change_24h || 0), 0);
+      const base = total - pl;
+      const plPct = base ? (pl / base) * 100 : 0;
+      $("s-total").textContent = fmtPrice(total);
+      $("s-total-sub").textContent = `${held.length}개 코인 보유`;
+      $("s-pl").textContent = fmtSigned(pl);
+      $("s-pl").className = "value num " + (pl >= 0 ? "up" : "down");
+      $("s-pl-sub").textContent = fmtPct(plPct);
+      $("s-pl-sub").className = "sub num " + (pl >= 0 ? "up" : "down");
+    } else {
+      $("s-total").textContent = "-";
+      $("s-total-sub").textContent = "카드 아래에 보유 수량을 입력하면 계산돼요";
+      $("s-pl").textContent = "-";
+      $("s-pl").className = "value num";
+      $("s-pl-sub").textContent = "";
+    }
+
+    // 시장 분위기
+    const ups = coins.filter((c) => pctOf(c) >= 0).length;
+    const downs = coins.length - ups;
+    $("s-breadth").textContent = coins.length ? `상승 ${ups} · 하락 ${downs}` : "-";
+    $("b-up").style.width = coins.length ? (ups / coins.length) * 100 + "%" : "0";
+    $("b-down").style.width = coins.length ? (downs / coins.length) * 100 + "%" : "0";
+
+    // 최고 / 최저
+    if (coins.length) {
+      const byPct = [...coins].sort((a, b) => pctOf(b) - pctOf(a));
+      const best = byPct[0], worst = byPct[byPct.length - 1];
+      $("s-best").textContent = `${best.symbol.toUpperCase()}  ${fmtPct(pctOf(best))}`;
+      $("s-worst").textContent = `${worst.symbol.toUpperCase()}  ${fmtPct(pctOf(worst))}`;
+      $("s-best").className = "sub num " + (pctOf(best) >= 0 ? "up" : "down");
+      $("s-worst").className = "sub num " + (pctOf(worst) >= 0 ? "up" : "down");
+    } else {
+      $("s-best").textContent = "-";
+      $("s-worst").textContent = "-";
+    }
+  }
+
+  function showSkeleton() {
+    $("grid").innerHTML = watchlist.map(() => `<div class="card skeleton"></div>`).join("");
+  }
+
+  function setStatus(text, isError = false) {
+    $("status-text").textContent = text;
+    $("status").classList.toggle("error", isError);
+  }
+
+  // ── TOP 10 ──
+  function renderTop() {
+    const body = $("top-body");
+    const ranked = market
+      .filter((c) => c.price_change_percentage_24h != null)
+      .sort((a, b) => topMode === "gainers" ? pctOf(b) - pctOf(a) : pctOf(a) - pctOf(b))
+      .slice(0, 10);
+    if (!ranked.length) {
+      body.innerHTML = `<tr><td colspan="6" class="t-empty">${market.length ? "표시할 코인이 없어요" : "불러오는 중…"}</td></tr>`;
+      return;
+    }
+    const maxAbs = Math.max(...ranked.map((c) => Math.abs(pctOf(c)))) || 1;
+    body.innerHTML = "";
+    ranked.forEach((c, i) => {
+      const p = pctOf(c);
+      const tr = document.createElement("tr");
+      tr.className = p >= 0 ? "up" : "down";
+      tr.innerHTML = `
+        <td class="c-no">${i + 1}</td>
+        <td><div class="t-coin"><img alt="" loading="lazy" /><span class="t-name"></span><span class="t-sym"></span></div></td>
+        <td class="r num"></td>
+        <td><div class="pct-cell"><span class="bar"><i></i></span><span class="v"></span></div></td>
+        <td class="r c-rank num"></td>
+        <td class="c-add"><button class="t-add"></button></td>`;
+      tr.querySelector("img").src = c.image;
+      tr.querySelector(".t-name").textContent = c.name;
+      tr.querySelector(".t-sym").textContent = c.symbol;
+      tr.children[2].textContent = fmtPrice(c.current_price);
+      tr.querySelector(".bar > i").style.width = (Math.abs(p) / maxAbs) * 100 + "%";
+      tr.querySelector(".v").textContent = fmtPct(p);
+      tr.children[4].textContent = c.market_cap_rank ? "#" + c.market_cap_rank : "-";
+      const btn = tr.querySelector(".t-add");
+      const added = watchlist.includes(c.id);
+      btn.textContent = added ? "관심 중" : "+ 관심";
+      btn.disabled = added;
+      btn.title = added ? "이미 관심 코인에 있어요" : "관심 코인에 추가";
+      btn.addEventListener("click", () => addCoin(c.id));
+      body.appendChild(tr);
+    });
+  }
+
+  // ── 시세 불러오기 ──
+  async function fetchJson(url) {
+    const res = await fetch(url);
+    if (res.status === 429) throw new Error("요청이 너무 많아요. 1분쯤 뒤에 다시 시도해 주세요.");
+    if (!res.ok) throw new Error(`CoinGecko 응답 오류 (${res.status})`);
+    return res.json();
+  }
+
+  async function load() {
+    if (loading) return;
+    loading = true;
+    $("refresh").disabled = true;
+    $("refresh").classList.add("loading");
+    // 관심 코인 시세와 TOP 10용 시장 데이터를 동시에 요청 (갱신 1번에 API 2번 호출)
+    const watchReq = watchlist.length
+      ? fetchJson(`${API}/coins/markets?vs_currency=${currency}&ids=${watchlist.join(",")}&sparkline=true&price_change_percentage=24h`)
+      : Promise.resolve([]);
+    const marketReq = fetchJson(`${API}/coins/markets?vs_currency=${currency}&order=market_cap_desc&per_page=250&page=1&price_change_percentage=24h`);
+    try {
+      const [w, m] = await Promise.allSettled([watchReq, marketReq]);
+      if (w.status === "fulfilled") {
+        coins = w.value;
+        renderCards(true);
+        renderSummary();
+        lastPrices = Object.fromEntries(coins.map((c) => [c.id, c.current_price]));
+      }
+      if (m.status === "fulfilled") {
+        market = m.value;
+        renderTop();
+      }
+      // 실패한 쪽이 있으면 화면의 기존 데이터는 그대로 두고 상태 줄에만 오류 표시
+      const failed = [w, m].find((r) => r.status === "rejected");
+      if (failed) {
+        const msg = failed.reason?.message;
+        setStatus(msg === "Failed to fetch" ? "네트워크에 연결할 수 없어요. 인터넷 연결을 확인해 주세요." : msg, true);
+      } else {
+        setStatus(watchlist.length
+          ? `마지막 갱신 ${new Date().toLocaleTimeString("ko-KR")}`
+          : "관심 코인을 추가해 주세요");
+      }
+    } finally {
+      loading = false;
+      $("refresh").disabled = false;
+      $("refresh").classList.remove("loading");
+      schedule();
+    }
+  }
+
+  // 자동 갱신 타이머 + 다음 갱신까지 진행 바
+  function schedule() {
+    clearTimeout(timer);
+    clearInterval(barTimer);
+    const sec = Number($("interval").value);
+    $("bar").style.width = "0";
+    if (!sec) return;
+    const start = Date.now();
+    barTimer = setInterval(() => {
+      $("bar").style.width = Math.min(100, (Date.now() - start) / (sec * 10)) + "%";
+    }, 250);
+    timer = setTimeout(load, sec * 1000);
+  }
+
+  // ── 관심 코인 추가 / 삭제 ──
+  function addCoin(id) {
+    if (watchlist.includes(id)) return;
+    watchlist = [...watchlist, id];
+    store.set("watchlist", watchlist);
+    $("search").value = "";
+    $("results").hidden = true;
+    load();
+  }
+
+  function removeCoin(id) {
+    watchlist = watchlist.filter((x) => x !== id);
+    coins = coins.filter((c) => c.id !== id);
+    delete holdings[id];
+    store.set("watchlist", watchlist);
+    store.set("holdings", holdings);
+    renderCards(false);
+    renderSummary();
+    renderTop();
+  }
+
+  // CoinGecko 검색은 한글을 못 알아들어서 자주 쓰는 한글 이름만 영문으로 바꿔 검색
+  const KO_NAMES = {
+    비트코인: "bitcoin", 이더리움: "ethereum", 리플: "ripple", 엑스알피: "xrp", 솔라나: "solana",
+    도지: "dogecoin", 도지코인: "dogecoin", 에이다: "cardano", 카르다노: "cardano", 트론: "tron",
+    폴카닷: "polkadot", 체인링크: "chainlink", 아발란체: "avalanche", 시바이누: "shiba inu", 수이: "sui",
+    스텔라: "stellar", 스텔라루멘: "stellar", 테더: "tether", 비트코인캐시: "bitcoin cash",
+    라이트코인: "litecoin", 니어: "near", 앱토스: "aptos", 아비트럼: "arbitrum", 폴리곤: "polygon",
+    이더리움클래식: "ethereum classic", 톤코인: "toncoin", 페페: "pepe", 바이낸스코인: "bnb", 비앤비: "bnb",
+  };
+  const toQuery = (q) => KO_NAMES[q.replace(/\s/g, "")] || q;
+
+  let searchTimer = null, searchSeq = 0;
+  $("search").addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    const q = toQuery($("search").value.trim());
+    if (q.length < 2) { $("results").hidden = true; return; }
+    searchTimer = setTimeout(() => runSearch(q), 400); // 무료 API 호출 수 아끼려고 입력이 멈춘 뒤 검색
+  });
+
+  async function runSearch(q) {
+    const seq = ++searchSeq;
+    const box = $("results");
+    try {
+      const res = await fetch(`${API}/search?query=${encodeURIComponent(q)}`);
+      if (!res.ok) throw new Error(res.status === 429 ? "요청이 너무 많아요. 잠시 뒤 다시 검색해 주세요." : "검색에 실패했어요.");
+      const data = await res.json();
+      if (seq !== searchSeq) return; // 더 최신 검색이 있으면 무시
+      const hits = (data.coins || []).slice(0, 7);
+      box.innerHTML = "";
+      if (!hits.length) {
+        box.innerHTML = `<div class="r-empty">검색 결과가 없어요</div>`;
+      }
+      hits.forEach((h) => {
+        const b = document.createElement("button");
+        const added = watchlist.includes(h.id);
+        b.disabled = added;
+        b.innerHTML = `<img alt="" /><span class="r-name"></span><span class="r-sym"></span><span class="r-tag"></span>`;
+        b.querySelector("img").src = h.thumb;
+        b.querySelector(".r-name").textContent = h.name;
+        b.querySelector(".r-sym").textContent = h.symbol;
+        b.querySelector(".r-tag").textContent = added ? "추가됨" : (h.market_cap_rank ? "#" + h.market_cap_rank : "");
+        b.addEventListener("click", () => addCoin(h.id));
+        box.appendChild(b);
+      });
+      box.hidden = false;
+    } catch (e) {
+      if (seq !== searchSeq) return;
+      box.innerHTML = "";
+      const msg = document.createElement("div");
+      msg.className = "r-empty";
+      msg.textContent = e.message === "Failed to fetch" ? "네트워크에 연결할 수 없어요." : e.message;
+      box.appendChild(msg);
+      box.hidden = false;
+    }
+  }
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".search")) $("results").hidden = true;
+  });
+  $("search").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") $("results").hidden = true;
+  });
+
+  // Enter 또는 [+ 추가]: 검색 결과 중 맨 위(아직 안 추가된) 코인을 바로 추가
+  $("add-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const raw = $("search").value.trim();
+    if (!raw) return;
+    const q = toQuery(raw);
+    clearTimeout(searchTimer);
+    searchSeq++; // 대기 중인 자동완성 결과가 뒤늦게 뜨지 않도록
+    setStatus(`"${q}" 찾는 중…`);
+    try {
+      const res = await fetch(`${API}/search?query=${encodeURIComponent(q)}`);
+      if (!res.ok) throw new Error(res.status === 429 ? "요청이 너무 많아요. 잠시 뒤 다시 시도해 주세요." : "검색에 실패했어요.");
+      const hits = (await res.json()).coins || [];
+      // 심볼이 정확히 같은 코인을 우선, 없으면 검색 1순위
+      const exact = hits.find((h) => h.symbol.toLowerCase() === q.toLowerCase());
+      const pick = exact || hits[0];
+      if (!pick) { setStatus(`"${raw}"에 해당하는 코인을 찾지 못했어요. 영문 이름이나 심볼로 다시 입력해 보세요.`, true); return; }
+      if (watchlist.includes(pick.id)) { setStatus(`${pick.name}은(는) 이미 관심 코인에 있어요.`); return; }
+      addCoin(pick.id);
+    } catch (err) {
+      setStatus(err.message === "Failed to fetch" ? "네트워크에 연결할 수 없어요." : err.message, true);
+    }
+  });
+
+  // ── 컨트롤 ──
+  $("refresh").addEventListener("click", load);
+  $("top-mode").addEventListener("click", (e) => {
+    const mode = e.target.dataset?.mode;
+    if (!mode || mode === topMode) return;
+    topMode = mode;
+    store.set("topMode", topMode);
+    document.querySelectorAll("#top-mode button").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
+    renderTop(); // 이미 받아 둔 데이터로 바로 전환 — API 호출 없음
+  });
+  $("interval").addEventListener("change", () => {
+    store.set("refreshSec", Number($("interval").value));
+    schedule();
+  });
+  $("sort").addEventListener("change", () => {
+    sortBy = $("sort").value;
+    store.set("sort", sortBy);
+    renderCards(false);
+  });
+  $("currency").addEventListener("click", (e) => {
+    const cur = e.target.dataset?.cur;
+    if (!cur || cur === currency) return;
+    currency = cur;
+    store.set("currency", currency);
+    lastPrices = {}; // 통화가 바뀌면 깜빡임 비교 기준 초기화
+    market = [];
+    renderTop();
+    document.querySelectorAll("#currency button").forEach((b) => b.classList.toggle("on", b.dataset.cur === cur));
+    showSkeleton();
+    load();
+  });
+  // 다른 탭에 있다 돌아오면 바로 최신 시세로
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && Number($("interval").value)) load();
+  });
+
+  showSkeleton();
+  load();
+</script>
+</body>
+</html>

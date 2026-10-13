@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>더치페이 계산기</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN은 버전을 고정한다. Babel 은 반드시 7.x (8.x는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes pop-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .animate-pop { animation: pop-in .2s ease-out; }
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useMemo, useEffect, useCallback, useRef } = React;
+
+    // ========================================
+    // 🛠️ Utils
+    // ========================================
+    const STORAGE_KEY = 'dutch-pay-v1';
+    const won = (n) => `${Math.round(n).toLocaleString('ko-KR')}원`;
+    const uid = () => Math.random().toString(36).slice(2, 9);
+    const toInt = (v) => {
+      const n = parseInt(String(v).replace(/[^\d]/g, ''), 10);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch { return null; }
+    }
+
+    function saveState(state) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+    }
+
+    // 지출 1건을 참여자에게 원 단위로 나눈다. 나머지 원은 앞쪽 참여자부터 1원씩 더 부담.
+    function splitAmount(amount, ids) {
+      const n = ids.length;
+      const base = Math.floor(amount / n);
+      let rest = amount - base * n;
+      return ids.map((id) => ({ id, share: base + (rest-- > 0 ? 1 : 0) }));
+    }
+
+    // 잔액(받을 돈 +, 낼 돈 -)을 최소 송금 횟수에 가깝게 정리 (그리디)
+    function settle(balances) {
+      const creditors = balances.filter((b) => b.balance > 0).map((b) => ({ ...b })).sort((a, b) => b.balance - a.balance);
+      const debtors = balances.filter((b) => b.balance < 0).map((b) => ({ ...b, balance: -b.balance })).sort((a, b) => b.balance - a.balance);
+      const transfers = [];
+      let i = 0, j = 0;
+      while (i < debtors.length && j < creditors.length) {
+        const amt = Math.min(debtors[i].balance, creditors[j].balance);
+        if (amt > 0) transfers.push({ from: debtors[i].id, to: creditors[j].id, amount: amt });
+        debtors[i].balance -= amt;
+        creditors[j].balance -= amt;
+        if (debtors[i].balance === 0) i++;
+        if (creditors[j].balance === 0) j++;
+      }
+      return transfers;
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled = false, onClick, className = '', children, type = 'button', ...rest }) {
+      const variants = {
+        primary: 'bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:ring-emerald-500',
+        secondary: 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 focus-visible:ring-slate-400',
+        danger: 'bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-500',
+        ghost: 'bg-transparent text-slate-600 hover:bg-slate-100 focus-visible:ring-slate-400',
+      };
+      const sizes = { sm: 'px-2.5 py-1.5 text-sm', md: 'px-4 py-2 text-sm', lg: 'px-5 py-3 text-base' };
+      return (
+        <button
+          type={type}
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:opacity-40 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ type = 'text', label, value, onChange, placeholder, error, disabled = false, suffix, className = '', id, ...rest }) {
+      const autoId = useRef(`in-${uid()}`).current;
+      const inputId = id || autoId;
+      return (
+        <div className={className}>
+          {label && <label htmlFor={inputId} className="block text-sm font-medium text-slate-600 mb-1">{label}</label>}
+          <div className="relative">
+            <input
+              id={inputId}
+              type={type}
+              value={value}
+              onChange={onChange}
+              placeholder={placeholder}
+              disabled={disabled}
+              aria-invalid={!!error}
+              className={`w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none transition focus:ring-2 disabled:bg-slate-100 ${suffix ? 'pr-9' : ''} ${error ? 'border-rose-400 focus:ring-rose-200' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-100'}`}
+              {...rest}
+            />
+            {suffix && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{suffix}</span>}
+          </div>
+          {error && <p className="mt-1 text-xs text-rose-600" role="alert">{error}</p>}
+        </div>
+      );
+    }
+
+    function Select({ label, value, onChange, options, className = '', id }) {
+      const autoId = useRef(`sel-${uid()}`).current;
+      const selectId = id || autoId;
+      return (
+        <div className={className}>
+          {label && <label htmlFor={selectId} className="block text-sm font-medium text-slate-600 mb-1">{label}</label>}
+          <select
+            id={selectId}
+            value={value}
+            onChange={onChange}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+          >
+            {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+      );
+    }
+
+    function Card({ title, action, className = '', children }) {
+      return (
+        <section className={`rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 ${className}`}>
+          {(title || action) && (
+            <div className="mb-4 flex items-center justify-between gap-2">
+              {title && <h2 className="text-base font-semibold text-slate-800">{title}</h2>}
+              {action}
+            </div>
+          )}
+          {children}
+        </section>
+      );
+    }
+
+    function Badge({ color = 'slate', children, className = '' }) {
+      const colors = {
+        slate: 'bg-slate-100 text-slate-600',
+        emerald: 'bg-emerald-100 text-emerald-700',
+        rose: 'bg-rose-100 text-rose-700',
+        amber: 'bg-amber-100 text-amber-700',
+      };
+      return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[color]} ${className}`}>{children}</span>;
+    }
+
+    function Tabs({ tabs, active, onChange }) {
+      return (
+        <div role="tablist" className="inline-flex rounded-xl bg-slate-200/70 p-1">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={active === t.id}
+              onClick={() => onChange(t.id)}
+              className={`rounded-lg px-4 py-1.5 text-sm font-medium transition ${active === t.id ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, size = 'md', children }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [isOpen, onClose]);
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-2xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
+          <div role="dialog" aria-modal="true" aria-label={title} className={`animate-pop w-full ${sizes[size]} rounded-2xl bg-white p-5 shadow-xl`} onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">{title}</h3>
+              <button onClick={onClose} aria-label="닫기" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">✕</button>
+            </div>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    function EmptyState({ icon, message }) {
+      return (
+        <div className="rounded-xl border border-dashed border-slate-300 py-8 text-center text-sm text-slate-400">
+          <div className="mb-1 text-2xl" aria-hidden="true">{icon}</div>
+          {message}
+        </div>
+      );
+    }
+
+    function Toast({ message }) {
+      if (!message) return null;
+      return (
+        <div role="status" className="animate-pop fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-slate-800 px-4 py-2 text-sm text-white shadow-lg">
+          {message}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Header({ tab, onTab }) {
+      return (
+        <header className="mb-6 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">💸 더치페이 계산기</h1>
+            <p className="text-sm text-slate-500">누가 누구에게 얼마를 보내면 되는지 한 번에</p>
+          </div>
+          <Tabs
+            tabs={[{ id: 'simple', label: '간단 N빵' }, { id: 'detail', label: '상세 정산' }]}
+            active={tab}
+            onChange={onTab}
+          />
+        </header>
+      );
+    }
+
+    function Footer() {
+      return <footer className="mt-10 text-center text-xs text-slate-400">입력한 내용은 이 브라우저에만 저장됩니다.</footer>;
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+
+    // ---------- 간단 N빵 ----------
+    function SimplePage({ notify }) {
+      const [total, setTotal] = useState('');
+      const [people, setPeople] = useState('4');
+      const [unit, setUnit] = useState('100');
+
+      const totalNum = toInt(total);
+      const peopleNum = toInt(people);
+      const unitNum = Number(unit);
+      const peopleError = people !== '' && peopleNum < 1 ? '1명 이상 입력하세요' : '';
+
+      const result = useMemo(() => {
+        if (!totalNum || peopleNum < 1) return null;
+        const exact = totalNum / peopleNum;
+        const perPerson = Math.ceil(exact / unitNum) * unitNum;
+        const collected = perPerson * peopleNum;
+        return { exact, perPerson, collected, surplus: collected - totalNum };
+      }, [totalNum, peopleNum, unitNum]);
+
+      const copy = async () => {
+        if (!result) return;
+        const text = `[더치페이] 총 ${won(totalNum)} / ${peopleNum}명\n1인당 ${won(result.perPerson)}씩 보내주세요!`;
+        try { await navigator.clipboard.writeText(text); notify('복사했어요'); } catch { notify('복사에 실패했어요'); }
+      };
+
+      return (
+        <div className="grid gap-5 md:grid-cols-2">
+          <Card title="입력">
+            <div className="space-y-4">
+              <Input
+                label="총 금액"
+                inputMode="numeric"
+                value={total ? toInt(total).toLocaleString('ko-KR') : ''}
+                onChange={(e) => setTotal(e.target.value)}
+                placeholder="예: 87,000"
+                suffix="원"
+              />
+              <div>
+                <Input
+                  label="인원"
+                  type="number"
+                  min="1"
+                  value={people}
+                  onChange={(e) => setPeople(e.target.value)}
+                  error={peopleError}
+                  suffix="명"
+                />
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" variant="secondary" aria-label="인원 줄이기" onClick={() => setPeople(String(Math.max(1, peopleNum - 1)))}>−</Button>
+                  <Button size="sm" variant="secondary" aria-label="인원 늘리기" onClick={() => setPeople(String(peopleNum + 1))}>＋</Button>
+                </div>
+              </div>
+              <Select
+                label="1인당 금액 올림 단위"
+                value={unit}
+                onChange={(e) => setUnit(e.target.value)}
+                options={[
+                  { value: '1', label: '1원 (올림 없음)' },
+                  { value: '10', label: '10원 단위' },
+                  { value: '100', label: '100원 단위' },
+                  { value: '1000', label: '1,000원 단위' },
+                ]}
+              />
+            </div>
+          </Card>
+
+          <Card title="결과">
+            {result ? (
+              <div className="animate-pop space-y-4">
+                <div className="rounded-xl bg-emerald-50 p-5 text-center">
+                  <p className="text-sm text-emerald-700">1인당</p>
+                  <p className="text-4xl font-bold text-emerald-700">{won(result.perPerson)}</p>
+                  {unitNum > 1 && <p className="mt-1 text-xs text-emerald-600">정확히는 {result.exact.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}원</p>}
+                </div>
+                <dl className="space-y-2 text-sm">
+                  <div className="flex justify-between"><dt className="text-slate-500">모이는 금액</dt><dd>{won(result.collected)}</dd></div>
+                  <div className="flex justify-between">
+                    <dt className="text-slate-500">총무 남는 돈</dt>
+                    <dd>{result.surplus > 0 ? <Badge color="amber">+{won(result.surplus)}</Badge> : '0원'}</dd>
+                  </div>
+                </dl>
+                <Button className="w-full" onClick={copy}>📋 공유 문구 복사</Button>
+              </div>
+            ) : (
+              <EmptyState icon="🧮" message="총 금액과 인원을 입력하세요" />
+            )}
+          </Card>
+        </div>
+      );
+    }
+
+    // ---------- 상세 정산 ----------
+    function MembersCard({ members, onAdd, onRemove, usedIds }) {
+      const [name, setName] = useState('');
+      const [error, setError] = useState('');
+
+      const submit = (e) => {
+        e.preventDefault();
+        const trimmed = name.trim();
+        if (!trimmed) return setError('이름을 입력하세요');
+        if (members.some((m) => m.name === trimmed)) return setError('이미 있는 이름이에요');
+        onAdd(trimmed);
+        setName('');
+        setError('');
+      };
+
+      return (
+        <Card title={`참여자 (${members.length}명)`}>
+          <form onSubmit={submit} className="flex items-start gap-2">
+            <Input className="flex-1" value={name} onChange={(e) => { setName(e.target.value); setError(''); }} placeholder="이름 입력 후 Enter" error={error} aria-label="참여자 이름" />
+            <Button type="submit">추가</Button>
+          </form>
+          <ul className="mt-4 flex flex-wrap gap-2">
+            {members.map((m) => (
+              <li key={m.id} className="animate-pop inline-flex items-center gap-1 rounded-full bg-slate-100 py-1 pl-3 pr-1 text-sm">
+                {m.name}
+                <button
+                  onClick={() => onRemove(m.id)}
+                  disabled={usedIds.has(m.id)}
+                  title={usedIds.has(m.id) ? '지출 내역에 포함된 참여자는 삭제할 수 없어요' : '삭제'}
+                  aria-label={`${m.name} 삭제`}
+                  className="rounded-full px-1.5 text-slate-400 hover:bg-slate-200 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-30"
+                >✕</button>
+              </li>
+            ))}
+          </ul>
+          {members.length === 0 && <EmptyState icon="👥" message="함께한 사람을 추가하세요" />}
+        </Card>
+      );
+    }
+
+    function ExpenseForm({ members, initial, onSubmit, onCancel }) {
+      const [title, setTitle] = useState(initial?.title || '');
+      const [amount, setAmount] = useState(initial ? String(initial.amount) : '');
+      const [payerId, setPayerId] = useState(initial?.payerId || members[0]?.id || '');
+      const [targets, setTargets] = useState(new Set(initial?.targets || members.map((m) => m.id)));
+      const [errors, setErrors] = useState({});
+
+      const toggle = (id) => {
+        const next = new Set(targets);
+        next.has(id) ? next.delete(id) : next.add(id);
+        setTargets(next);
+      };
+
+      const submit = (e) => {
+        e.preventDefault();
+        const errs = {};
+        if (!title.trim()) errs.title = '항목명을 입력하세요';
+        if (toInt(amount) <= 0) errs.amount = '금액을 입력하세요';
+        if (targets.size === 0) errs.targets = '나눌 사람을 1명 이상 선택하세요';
+        setErrors(errs);
+        if (Object.keys(errs).length) return;
+        onSubmit({
+          id: initial?.id || uid(),
+          title: title.trim(),
+          amount: toInt(amount),
+          payerId,
+          targets: members.filter((m) => targets.has(m.id)).map((m) => m.id),
+        });
+      };
+
+      return (
+        <form onSubmit={submit} className="space-y-4">
+          <Input label="항목" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="예: 1차 고깃집" error={errors.title} autoFocus />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input label="금액" inputMode="numeric" value={amount ? toInt(amount).toLocaleString('ko-KR') : ''} onChange={(e) => setAmount(e.target.value)} placeholder="0" suffix="원" error={errors.amount} />
+            <Select label="결제한 사람" value={payerId} onChange={(e) => setPayerId(e.target.value)} options={members.map((m) => ({ value: m.id, label: m.name }))} />
+          </div>
+          <fieldset>
+            <div className="mb-1 flex items-center justify-between">
+              <legend className="text-sm font-medium text-slate-600">나눌 사람</legend>
+              <div className="flex gap-1">
+                <Button size="sm" variant="ghost" onClick={() => setTargets(new Set(members.map((m) => m.id)))}>전체</Button>
+                <Button size="sm" variant="ghost" onClick={() => setTargets(new Set())}>해제</Button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {members.map((m) => {
+                const on = targets.has(m.id);
+                return (
+                  <button
+                    type="button"
+                    key={m.id}
+                    aria-pressed={on}
+                    onClick={() => toggle(m.id)}
+                    className={`rounded-full border px-3 py-1 text-sm transition ${on ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 text-slate-400 hover:border-slate-400'}`}
+                  >
+                    {on ? '✓ ' : ''}{m.name}
+                  </button>
+                );
+              })}
+            </div>
+            {errors.targets && <p className="mt-1 text-xs text-rose-600" role="alert">{errors.targets}</p>}
+            {targets.size > 0 && toInt(amount) > 0 && (
+              <p className="mt-2 text-xs text-slate-500">1인당 약 {won(toInt(amount) / targets.size)}</p>
+            )}
+          </fieldset>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={onCancel}>취소</Button>
+            <Button type="submit">{initial ? '수정' : '추가'}</Button>
+          </div>
+        </form>
+      );
+    }
+
+    function ExpensesCard({ members, expenses, nameOf, onSave, onRemove }) {
+      const [editing, setEditing] = useState(null); // null | 'new' | expense
+      const total = expenses.reduce((s, e) => s + e.amount, 0);
+      const close = useCallback(() => setEditing(null), []);
+
+      return (
+        <Card
+          title={`지출 내역 · ${won(total)}`}
+          action={<Button size="sm" onClick={() => setEditing('new')} disabled={members.length === 0}>＋ 지출 추가</Button>}
+        >
+          {expenses.length === 0 ? (
+            <EmptyState icon="🧾" message={members.length ? '결제한 내역을 추가하세요' : '먼저 참여자를 추가하세요'} />
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {expenses.map((e) => (
+                <li key={e.id} className="animate-pop flex items-center gap-3 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{e.title}</p>
+                    <p className="truncate text-xs text-slate-500">
+                      <span className="font-medium text-slate-700">{nameOf(e.payerId)}</span> 결제 · {e.targets.length === members.length ? '전원' : e.targets.map(nameOf).join(', ')} ({e.targets.length}명)
+                    </p>
+                  </div>
+                  <span className="shrink-0 font-semibold tabular-nums">{won(e.amount)}</span>
+                  <div className="flex shrink-0">
+                    <Button size="sm" variant="ghost" onClick={() => setEditing(e)} aria-label={`${e.title} 수정`}>✎</Button>
+                    <Button size="sm" variant="ghost" onClick={() => onRemove(e.id)} aria-label={`${e.title} 삭제`} className="hover:text-rose-600">🗑</Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Modal isOpen={!!editing} onClose={close} title={editing === 'new' ? '지출 추가' : '지출 수정'} size="md">
+            {editing && (
+              <ExpenseForm
+                key={editing === 'new' ? 'new' : editing.id}
+                members={members}
+                initial={editing === 'new' ? null : editing}
+                onSubmit={(exp) => { onSave(exp); close(); }}
+                onCancel={close}
+              />
+            )}
+          </Modal>
+        </Card>
+      );
+    }
+
+    function ResultCard({ members, expenses, nameOf, notify }) {
+      const { rows, transfers } = useMemo(() => {
+        const paid = Object.fromEntries(members.map((m) => [m.id, 0]));
+        const owed = Object.fromEntries(members.map((m) => [m.id, 0]));
+        expenses.forEach((e) => {
+          paid[e.payerId] = (paid[e.payerId] || 0) + e.amount;
+          splitAmount(e.amount, e.targets).forEach(({ id, share }) => { owed[id] = (owed[id] || 0) + share; });
+        });
+        const rows = members.map((m) => ({ id: m.id, paid: paid[m.id], owed: owed[m.id], balance: paid[m.id] - owed[m.id] }));
+        return { rows, transfers: settle(rows) };
+      }, [members, expenses]);
+
+      const copy = async () => {
+        const lines = [
+          '[더치페이 정산]',
+          ...expenses.map((e) => `· ${e.title} ${won(e.amount)} (${nameOf(e.payerId)} 결제)`),
+          '',
+          ...(transfers.length ? transfers.map((t) => `${nameOf(t.from)} → ${nameOf(t.to)} : ${won(t.amount)}`) : ['보낼 돈이 없어요!']),
+        ];
+        try { await navigator.clipboard.writeText(lines.join('\n')); notify('정산 결과를 복사했어요'); } catch { notify('복사에 실패했어요'); }
+      };
+
+      if (expenses.length === 0) {
+        return <Card title="정산 결과"><EmptyState icon="🤝" message="지출을 추가하면 정산 결과가 나와요" /></Card>;
+      }
+
+      return (
+        <Card title="정산 결과" action={<Button size="sm" variant="secondary" onClick={copy}>📋 복사</Button>}>
+          <h3 className="mb-2 text-sm font-medium text-slate-500">송금 안내 ({transfers.length}건)</h3>
+          {transfers.length === 0 ? (
+            <p className="rounded-xl bg-emerald-50 p-4 text-center text-sm text-emerald-700">이미 딱 맞게 정산됐어요 🎉</p>
+          ) : (
+            <ul className="space-y-2">
+              {transfers.map((t, i) => (
+                <li key={i} className="animate-pop flex items-center justify-between rounded-xl bg-emerald-50 px-4 py-3">
+                  <span className="text-sm">
+                    <b>{nameOf(t.from)}</b> <span className="text-slate-400" aria-label="에게">→</span> <b>{nameOf(t.to)}</b>
+                  </span>
+                  <span className="font-bold tabular-nums text-emerald-700">{won(t.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <h3 className="mb-2 mt-6 text-sm font-medium text-slate-500">개인별 내역</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-xs text-slate-400">
+                  <th className="py-2 font-medium">이름</th>
+                  <th className="py-2 text-right font-medium">낸 돈</th>
+                  <th className="py-2 text-right font-medium">부담액</th>
+                  <th className="py-2 text-right font-medium">차액</th>
+                </tr>
+              </thead>
+              <tbody className="tabular-nums">
+                {rows.map((r) => (
+                  <tr key={r.id} className="border-b border-slate-100 last:border-0">
+                    <td className="py-2 font-medium">{nameOf(r.id)}</td>
+                    <td className="py-2 text-right">{won(r.paid)}</td>
+                    <td className="py-2 text-right">{won(r.owed)}</td>
+                    <td className="py-2 text-right">
+                      {r.balance > 0 && <Badge color="emerald">+{won(r.balance)} 받음</Badge>}
+                      {r.balance < 0 && <Badge color="rose">{won(-r.balance)} 보냄</Badge>}
+                      {r.balance === 0 && <Badge>0원</Badge>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      );
+    }
+
+    function DetailPage({ notify }) {
+      const saved = useRef(loadState()).current;
+      const [members, setMembers] = useState(saved?.members || []);
+      const [expenses, setExpenses] = useState(saved?.expenses || []);
+      const [confirmReset, setConfirmReset] = useState(false);
+
+      useEffect(() => { saveState({ members, expenses }); }, [members, expenses]);
+
+      const nameOf = useCallback((id) => members.find((m) => m.id === id)?.name ?? '(알 수 없음)', [members]);
+      const usedIds = useMemo(() => new Set(expenses.flatMap((e) => [e.payerId, ...e.targets])), [expenses]);
+
+      const addMember = (name) => setMembers((ms) => [...ms, { id: uid(), name }]);
+      const removeMember = (id) => setMembers((ms) => ms.filter((m) => m.id !== id));
+      const saveExpense = (exp) => setExpenses((es) => (es.some((e) => e.id === exp.id) ? es.map((e) => (e.id === exp.id ? exp : e)) : [...es, exp]));
+      const removeExpense = (id) => setExpenses((es) => es.filter((e) => e.id !== id));
+
+      const loadSample = () => {
+        const ids = ['a', 'b', 'c', 'd'].map(() => uid());
+        setMembers(['지민', '서연', '도윤', '하준'].map((name, i) => ({ id: ids[i], name })));
+        setExpenses([
+          { id: uid(), title: '1차 삼겹살', amount: 92000, payerId: ids[0], targets: ids },
+          { id: uid(), title: '2차 맥주', amount: 48000, payerId: ids[1], targets: [ids[0], ids[1], ids[2]] },
+          { id: uid(), title: '택시비', amount: 15300, payerId: ids[3], targets: ids },
+        ]);
+        notify('예시 데이터를 불러왔어요');
+      };
+
+      const reset = () => { setMembers([]); setExpenses([]); setConfirmReset(false); notify('초기화했어요'); };
+
+      return (
+        <div className="space-y-5">
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="ghost" onClick={loadSample}>예시 불러오기</Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirmReset(true)} disabled={!members.length && !expenses.length} className="hover:text-rose-600">초기화</Button>
+          </div>
+          <div className="grid gap-5 lg:grid-cols-5">
+            <div className="space-y-5 lg:col-span-3">
+              <MembersCard members={members} onAdd={addMember} onRemove={removeMember} usedIds={usedIds} />
+              <ExpensesCard members={members} expenses={expenses} nameOf={nameOf} onSave={saveExpense} onRemove={removeExpense} />
+            </div>
+            <div className="lg:col-span-2">
+              <ResultCard members={members} expenses={expenses} nameOf={nameOf} notify={notify} />
+            </div>
+          </div>
+          <Modal isOpen={confirmReset} onClose={() => setConfirmReset(false)} title="전체 초기화" size="sm">
+            <p className="mb-5 text-sm text-slate-600">참여자와 지출 내역이 모두 삭제됩니다. 계속할까요?</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setConfirmReset(false)}>취소</Button>
+              <Button variant="danger" onClick={reset}>삭제</Button>
+            </div>
+          </Modal>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      const [tab, setTab] = useState('detail');
+      const [toast, setToast] = useState('');
+      const timer = useRef(null);
+
+      const notify = useCallback((msg) => {
+        setToast(msg);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => setToast(''), 1800);
+      }, []);
+
+      useEffect(() => () => clearTimeout(timer.current), []);
+
+      return (
+        <main className="mx-auto max-w-5xl px-4 py-8 sm:py-12">
+          <Header tab={tab} onTab={setTab} />
+          {tab === 'simple' ? <SimplePage notify={notify} /> : <DetailPage notify={notify} />}
+          <Footer />
+          <Toast message={toast} />
+        </main>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

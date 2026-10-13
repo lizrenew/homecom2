@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR 코드 생성기</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <style>
+    @keyframes pop { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
+    .animate-pop { animation: pop .25s ease-out; }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-50 via-white to-sky-50 min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled = false, onClick, className = '', children, type = 'button', ...rest }) {
+      const variants = {
+        primary: 'bg-indigo-600 text-white hover:bg-indigo-700 focus-visible:ring-indigo-500',
+        secondary: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus-visible:ring-gray-400',
+        danger: 'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500',
+        ghost: 'text-gray-600 hover:bg-gray-100 focus-visible:ring-gray-400',
+      };
+      const sizes = { sm: 'px-3 py-1.5 text-sm', md: 'px-4 py-2.5 text-sm', lg: 'px-6 py-3 text-base' };
+      return (
+        <button
+          type={type}
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ id, type = 'text', label, value, onChange, placeholder, error, disabled = false, className = '', ...rest }) {
+      return (
+        <div className={className}>
+          {label && <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>}
+          <input
+            id={id}
+            type={type}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            aria-invalid={!!error}
+            aria-describedby={error ? `${id}-error` : undefined}
+            className={`w-full rounded-xl border px-4 py-3 text-base outline-none transition focus:ring-2 ${error ? 'border-red-400 focus:ring-red-200' : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-100'}`}
+            {...rest}
+          />
+          {error && <p id={`${id}-error`} role="alert" className="mt-1.5 text-sm text-red-600">{error}</p>}
+        </div>
+      );
+    }
+
+    function Select({ id, label, value, onChange, options, className = '' }) {
+      return (
+        <div className={className}>
+          {label && <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>}
+          <select
+            id={id}
+            value={value}
+            onChange={onChange}
+            className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+          >
+            {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+      );
+    }
+
+    function ColorPicker({ id, label, value, onChange }) {
+      return (
+        <div>
+          <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>
+          <div className="flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-2 py-1.5">
+            <input id={id} type="color" value={value} onChange={onChange} className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0" />
+            <span className="font-mono text-sm text-gray-600 uppercase">{value}</span>
+          </div>
+        </div>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return <div className={`rounded-2xl bg-white shadow-lg shadow-indigo-100/50 border border-gray-100 p-6 ${className}`}>{children}</div>;
+    }
+
+    // ========================================
+    // 🛠️ Utilities
+    // ========================================
+    const HISTORY_KEY = 'qr-generator-history';
+
+    // 사용자가 입력한 주소를 정규화하고 검증한다 (프로토콜 생략 시 https:// 자동 추가)
+    function normalizeUrl(raw) {
+      const trimmed = raw.trim();
+      if (!trimmed) return { error: '웹사이트 주소를 입력해 주세요.' };
+      const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+      try {
+        const url = new URL(withProtocol);
+        if (!['http:', 'https:'].includes(url.protocol)) return { error: 'http 또는 https 주소만 지원합니다.' };
+        if (!url.hostname.includes('.') && url.hostname !== 'localhost') return { error: '올바른 웹사이트 주소가 아니에요. 예: www.naver.com' };
+        return { url: url.href };
+      } catch {
+        return { error: '올바른 웹사이트 주소가 아니에요. 예: www.naver.com' };
+      }
+    }
+
+    // QR 코드를 캔버스에 그린다
+    function drawQr(canvas, text, { size, fg, bg, level }) {
+      qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+      const qr = qrcode(0, level);
+      qr.addData(text);
+      qr.make();
+      const count = qr.getModuleCount();
+      const margin = 4;
+      const cell = Math.max(1, Math.floor(size / (count + margin * 2)));
+      const total = cell * (count + margin * 2);
+      canvas.width = total;
+      canvas.height = total;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, total, total);
+      ctx.fillStyle = fg;
+      for (let r = 0; r < count; r++) {
+        for (let c = 0; c < count; c++) {
+          if (qr.isDark(r, c)) ctx.fillRect((c + margin) * cell, (r + margin) * cell, cell, cell);
+        }
+      }
+    }
+
+    function loadHistory() {
+      try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; } catch { return []; }
+    }
+
+    function saveHistory(list) {
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); } catch {}
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Header() {
+      return (
+        <header className="text-center mb-8">
+          <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-600 text-2xl text-white shadow-lg mb-4" aria-hidden="true">▦</div>
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900">QR 코드 생성기</h1>
+          <p className="mt-2 text-gray-500">웹사이트 주소를 입력하면 바로 QR 코드로 바꿔드려요</p>
+        </header>
+      );
+    }
+
+    function Footer() {
+      return <footer className="mt-10 text-center text-xs text-gray-400">모든 변환은 브라우저 안에서만 처리돼요 · 서버로 전송되지 않습니다</footer>;
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function QrGeneratorPage() {
+      const [input, setInput] = useState('');
+      const [error, setError] = useState('');
+      const [qrUrl, setQrUrl] = useState('');
+      const [options, setOptions] = useState({ size: 512, fg: '#111827', bg: '#ffffff', level: 'M' });
+      const [history, setHistory] = useState(loadHistory);
+      const [copied, setCopied] = useState(false);
+      const canvasRef = useRef(null);
+
+      // URL 또는 옵션이 바뀌면 다시 그린다
+      useEffect(() => {
+        if (!qrUrl || !canvasRef.current) return;
+        try {
+          drawQr(canvasRef.current, qrUrl, options);
+        } catch {
+          setError('주소가 너무 길어서 QR 코드로 만들 수 없어요.');
+          setQrUrl('');
+        }
+      }, [qrUrl, options]);
+
+      const generate = useCallback((raw) => {
+        const { url, error } = normalizeUrl(raw);
+        if (error) { setError(error); return; }
+        setError('');
+        setQrUrl(url);
+        setHistory(prev => {
+          const next = [url, ...prev.filter(u => u !== url)].slice(0, 5);
+          saveHistory(next);
+          return next;
+        });
+      }, []);
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        generate(input);
+      };
+
+      const handleDownload = () => {
+        const link = document.createElement('a');
+        const host = (() => { try { return new URL(qrUrl).hostname; } catch { return 'qr'; } })();
+        link.download = `qrcode-${host}.png`;
+        link.href = canvasRef.current.toDataURL('image/png');
+        link.click();
+      };
+
+      const handleCopy = async () => {
+        try {
+          await navigator.clipboard.writeText(qrUrl);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {}
+      };
+
+      const clearHistory = () => { setHistory([]); saveHistory([]); };
+      const updateOption = (key) => (e) => setOptions(o => ({ ...o, [key]: key === 'size' ? Number(e.target.value) : e.target.value }));
+
+      return (
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* 입력 영역 */}
+          <Card>
+            <form onSubmit={handleSubmit} noValidate>
+              <Input
+                id="url"
+                label="웹사이트 주소"
+                value={input}
+                onChange={(e) => { setInput(e.target.value); if (error) setError(''); }}
+                placeholder="예: www.naver.com"
+                error={error}
+                autoFocus
+                inputMode="url"
+                autoComplete="url"
+              />
+              <Button type="submit" size="lg" className="w-full mt-4">QR 코드 만들기</Button>
+            </form>
+
+            <div className="mt-6 grid grid-cols-2 gap-4">
+              <Select id="size" label="크기" value={options.size} onChange={updateOption('size')} options={[
+                { value: 256, label: '작게 (256px)' },
+                { value: 512, label: '보통 (512px)' },
+                { value: 1024, label: '크게 (1024px)' },
+              ]} />
+              <Select id="level" label="오류 복원 수준" value={options.level} onChange={updateOption('level')} options={[
+                { value: 'L', label: '낮음 (L)' },
+                { value: 'M', label: '보통 (M)' },
+                { value: 'Q', label: '높음 (Q)' },
+                { value: 'H', label: '최고 (H)' },
+              ]} />
+              <ColorPicker id="fg" label="QR 색상" value={options.fg} onChange={updateOption('fg')} />
+              <ColorPicker id="bg" label="배경 색상" value={options.bg} onChange={updateOption('bg')} />
+            </div>
+
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-sm font-medium text-gray-700">최근 변환한 주소</h2>
+                {history.length > 0 && <Button variant="ghost" size="sm" onClick={clearHistory}>지우기</Button>}
+              </div>
+              {history.length === 0 ? (
+                <p className="text-sm text-gray-400">아직 변환 기록이 없어요.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {history.map(u => (
+                    <li key={u}>
+                      <button
+                        type="button"
+                        onClick={() => { setInput(u); generate(u); }}
+                        className="w-full truncate rounded-lg bg-gray-50 px-3 py-2 text-left text-sm text-gray-600 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                      >
+                        {u}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </Card>
+
+          {/* 결과 영역 */}
+          <Card className="flex flex-col items-center justify-center min-h-[22rem]">
+            {qrUrl ? (
+              <div className="w-full flex flex-col items-center animate-pop">
+                <canvas
+                  ref={canvasRef}
+                  role="img"
+                  aria-label={`${qrUrl} 로 연결되는 QR 코드`}
+                  className="w-full max-w-[18rem] h-auto rounded-xl border border-gray-100 shadow-sm"
+                />
+                <a href={qrUrl} target="_blank" rel="noopener noreferrer" className="mt-4 max-w-full truncate text-sm text-indigo-600 hover:underline">{qrUrl}</a>
+                <div className="mt-5 flex w-full max-w-[18rem] gap-2">
+                  <Button onClick={handleDownload} className="flex-1">⬇ PNG 저장</Button>
+                  <Button variant="secondary" onClick={handleCopy} className="flex-1" aria-live="polite">{copied ? '✓ 복사됨' : '주소 복사'}</Button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center text-gray-400">
+                <div className="mx-auto mb-4 grid h-40 w-40 place-items-center rounded-2xl border-2 border-dashed border-gray-200 text-5xl" aria-hidden="true">▦</div>
+                <p>주소를 입력하면 여기에 QR 코드가 나타나요</p>
+              </div>
+            )}
+          </Card>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return (
+        <main className="mx-auto max-w-4xl px-4 py-10 sm:py-14">
+          <Header />
+          <QrGeneratorPage />
+          <Footer />
+        </main>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

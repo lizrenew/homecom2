@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>마음쉼표 · AI 심리상담</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- 모든 CDN 버전 고정 (Babel 은 반드시 7.x) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes bounceDot { 0%, 80%, 100% { transform: translateY(0); opacity: .4; } 40% { transform: translateY(-4px); opacity: 1; } }
+    .dot { animation: bounceDot 1.2s infinite ease-in-out; }
+    .dot:nth-child(2) { animation-delay: .15s; }
+    .dot:nth-child(3) { animation-delay: .3s; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .fade-up { animation: fadeUp .25s ease-out; }
+  </style>
+</head>
+<body class="bg-stone-100">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks
+    // ========================================
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // ========================================
+    // ⚙️ Config
+    // ========================================
+    // API 키·시스템 프롬프트는 서버(server.js)에만 있다. 브라우저는 /api/chat 만 호출한다.
+    const API_BASE_URL = '/api';
+    const HISTORY_STORAGE = 'mindchat.history';
+    const LEGACY_KEY_STORAGE = 'mindchat.apiKey'; // 예전 버전이 브라우저에 저장한 키 (삭제용)
+    const MAX_CONTEXT = 20; // 서버로 보내는 최근 메시지 수
+
+    const WELCOME = {
+      role: 'assistant',
+      content: '안녕하세요, 마음쉼표예요. 🌿\n오늘 하루는 어떠셨나요? 마음에 걸리는 일이 있다면 편하게 이야기해 주세요. 천천히 들을게요.',
+    };
+
+    const SUGGESTIONS = ['요즘 잠을 잘 못 자요', '회사 일 때문에 너무 지쳐요', '사람들과의 관계가 힘들어요', '이유 없이 불안해요'];
+
+    const safeGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+    const safeSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:ring-emerald-400',
+        secondary: 'bg-white text-stone-700 border border-stone-300 hover:bg-stone-50 focus-visible:ring-stone-300',
+        danger: 'bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-400',
+        ghost: 'text-stone-600 hover:bg-stone-200/60 focus-visible:ring-stone-300',
+      };
+      const sizes = { sm: 'px-3 py-1.5 text-sm', md: 'px-4 py-2 text-sm', lg: 'px-5 py-3 text-base' };
+      return (
+        <button
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-1.5 rounded-xl font-medium transition focus:outline-none focus-visible:ring-2 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    // ========================================
+    // 🧩 Common / Layout Components
+    // ========================================
+    function Header({ onReset }) {
+      return (
+        <header className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-stone-200 bg-white/80 backdrop-blur">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl" aria-hidden="true">🌿</span>
+            <div>
+              <h1 className="font-semibold text-stone-800 leading-tight">마음쉼표</h1>
+              <p className="text-xs text-stone-500">AI 심리상담 동반자</p>
+            </div>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onReset} aria-label="대화 새로 시작">새 대화</Button>
+        </header>
+      );
+    }
+
+    function CrisisBanner() {
+      return (
+        <div className="px-4 sm:px-6 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-800">
+          AI는 전문 상담을 대신할 수 없어요. 위급하다면 <strong>자살예방상담 109</strong> · <strong>정신건강위기상담 1577-0199</strong> · <strong>119</strong>로 바로 연락하세요.
+        </div>
+      );
+    }
+
+    function MessageBubble({ role, content }) {
+      const isUser = role === 'user';
+      return (
+        <div className={`flex fade-up ${isUser ? 'justify-end' : 'justify-start'}`}>
+          {!isUser && <div className="mr-2 mt-1 h-8 w-8 shrink-0 rounded-full bg-emerald-100 flex items-center justify-center" aria-hidden="true">🌿</div>}
+          <div
+            className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed shadow-sm ${
+              isUser ? 'bg-emerald-600 text-white rounded-br-md' : 'bg-white text-stone-800 rounded-bl-md'
+            }`}
+          >
+            {content}
+          </div>
+        </div>
+      );
+    }
+
+    function TypingIndicator() {
+      return (
+        <div className="flex justify-start" aria-live="polite" aria-label="답변 작성 중">
+          <div className="mr-2 mt-1 h-8 w-8 shrink-0 rounded-full bg-emerald-100 flex items-center justify-center" aria-hidden="true">🌿</div>
+          <div className="rounded-2xl rounded-bl-md bg-white px-4 py-3 shadow-sm flex gap-1">
+            <span className="dot h-2 w-2 rounded-full bg-stone-400"></span>
+            <span className="dot h-2 w-2 rounded-full bg-stone-400"></span>
+            <span className="dot h-2 w-2 rounded-full bg-stone-400"></span>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function ChatPage({ resetSignal }) {
+      const [messages, setMessages] = useState(() => {
+        try { return JSON.parse(safeGet(HISTORY_STORAGE)) || [WELCOME]; } catch { return [WELCOME]; }
+      });
+      const [input, setInput] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+      const bottomRef = useRef(null);
+      const textareaRef = useRef(null);
+
+      useEffect(() => { safeSet(HISTORY_STORAGE, JSON.stringify(messages)); }, [messages]);
+      useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
+      useEffect(() => {
+        if (resetSignal) { setMessages([WELCOME]); setError(''); }
+      }, [resetSignal]);
+
+      const send = useCallback(async (text) => {
+        const content = text.trim();
+        if (!content || loading) return;
+
+        const next = [...messages, { role: 'user', content }];
+        setMessages(next);
+        setInput('');
+        setError('');
+        setLoading(true);
+
+        try {
+          const res = await fetch(`${API_BASE_URL}/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // 첫 환영 인사(WELCOME)는 화면용이라 보내지 않는다
+            body: JSON.stringify({ messages: next.slice(1).slice(-MAX_CONTEXT) }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || `서버에 연결하지 못했어요 (${res.status})`);
+          }
+          setMessages((m) => [...m, { role: 'assistant', content: data.data.reply }]);
+        } catch (err) {
+          setError(err.message || '네트워크 오류가 발생했어요.');
+          setMessages((m) => m.slice(0, -1)); // 실패한 메시지는 되돌리고 입력창에 복원
+          setInput(content);
+        } finally {
+          setLoading(false);
+          textareaRef.current?.focus();
+        }
+      }, [loading, messages]);
+
+      const onKeyDown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          send(input);
+        }
+      };
+
+      const showSuggestions = messages.length === 1 && !loading;
+
+      return (
+        <>
+          <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 space-y-4" aria-live="polite">
+            {messages.map((m, i) => <MessageBubble key={i} {...m} />)}
+            {loading && <TypingIndicator />}
+            {showSuggestions && (
+              <div className="flex flex-wrap gap-2 pl-10">
+                {SUGGESTIONS.map((s) => (
+                  <button key={s} onClick={() => send(s)} className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800 hover:bg-emerald-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </main>
+
+          {error && (
+            <div role="alert" className="mx-4 sm:mx-6 mb-2 rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700">{error}</div>
+          )}
+
+          <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="border-t border-stone-200 bg-white px-4 sm:px-6 py-3 flex items-end gap-2">
+            <label htmlFor="msg" className="sr-only">메시지 입력</label>
+            <textarea
+              id="msg"
+              ref={textareaRef}
+              rows={1}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder="마음을 편하게 적어주세요… (Shift+Enter 줄바꿈)"
+              className="flex-1 resize-none max-h-40 rounded-xl border border-stone-300 px-3 py-2.5 text-[15px] focus:outline-none focus:ring-2 focus:ring-emerald-300"
+            />
+            <Button type="submit" size="lg" disabled={loading || !input.trim()} aria-label="보내기">보내기</Button>
+          </form>
+        </>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      const [resetSignal, setResetSignal] = useState(0);
+
+      // 예전 버전이 브라우저에 남긴 API 키를 지운다
+      useEffect(() => { safeSet(LEGACY_KEY_STORAGE, null); }, []);
+
+      const reset = () => { if (confirm('지금까지의 대화를 지우고 새로 시작할까요?')) setResetSignal(Date.now()); };
+
+      return (
+        <div className="mx-auto flex h-[100dvh] max-w-3xl flex-col bg-stone-50 shadow-sm">
+          <Header onReset={reset} />
+          <CrisisBanner />
+          <ChatPage resetSignal={resetSignal} />
+        </div>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

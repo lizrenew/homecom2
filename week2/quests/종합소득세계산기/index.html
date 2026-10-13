@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>종합소득세 계산기</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN은 버전 고정. Babel 은 반드시 7.x (8.x 는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .fade-in { animation: fadeIn .2s ease-out; }
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useMemo, useEffect, useId } = React;
+
+    // ========================================
+    // 🧮 Tax Rules (2025년 귀속 기준) & Helpers
+    // ========================================
+    const TAX_BRACKETS = [
+      { limit: 14_000_000, rate: 0.06, deduction: 0 },
+      { limit: 50_000_000, rate: 0.15, deduction: 1_260_000 },
+      { limit: 88_000_000, rate: 0.24, deduction: 5_760_000 },
+      { limit: 150_000_000, rate: 0.35, deduction: 15_440_000 },
+      { limit: 300_000_000, rate: 0.38, deduction: 19_940_000 },
+      { limit: 500_000_000, rate: 0.40, deduction: 25_940_000 },
+      { limit: 1_000_000_000, rate: 0.42, deduction: 35_940_000 },
+      { limit: Infinity, rate: 0.45, deduction: 65_940_000 },
+    ];
+
+    const STORAGE_KEY = 'income-tax-calc-v1';
+
+    const floor10 = (n) => Math.floor(n / 10) * 10; // 원 단위 절사
+    const won = (n) => `${Math.round(n).toLocaleString('ko-KR')}원`;
+    const pct = (n) => `${(n * 100).toFixed(1)}%`;
+
+    // 금액을 "1억 2,345만원" 형태로
+    function toKoreanUnit(n) {
+      if (!n) return '';
+      const eok = Math.floor(n / 100_000_000);
+      const man = Math.floor((n % 100_000_000) / 10_000);
+      const rest = n % 10_000;
+      const parts = [];
+      if (eok) parts.push(`${eok.toLocaleString()}억`);
+      if (man) parts.push(`${man.toLocaleString()}만`);
+      if (rest && !eok) parts.push(`${rest.toLocaleString()}`);
+      return parts.join(' ') + '원';
+    }
+
+    function findBracket(taxBase) {
+      return TAX_BRACKETS.find((b) => taxBase <= b.limit);
+    }
+
+    // 근로소득공제 (한도 2,000만원)
+    function earnedIncomeDeduction(salary) {
+      let d;
+      if (salary <= 5_000_000) d = salary * 0.7;
+      else if (salary <= 15_000_000) d = 3_500_000 + (salary - 5_000_000) * 0.4;
+      else if (salary <= 45_000_000) d = 7_500_000 + (salary - 15_000_000) * 0.15;
+      else if (salary <= 100_000_000) d = 12_000_000 + (salary - 45_000_000) * 0.05;
+      else d = 14_750_000 + (salary - 100_000_000) * 0.02;
+      return Math.min(Math.floor(d), 20_000_000, salary);
+    }
+
+    // 근로소득세액공제 한도 (총급여 기준)
+    function earnedTaxCreditLimit(salary) {
+      if (salary <= 33_000_000) return 740_000;
+      if (salary <= 70_000_000) return Math.max(740_000 - (salary - 33_000_000) * 0.008, 660_000);
+      if (salary <= 120_000_000) return Math.max(660_000 - (salary - 70_000_000) * 0.5, 500_000);
+      return Math.max(500_000 - (salary - 120_000_000) * 0.5, 200_000);
+    }
+
+    // 자녀세액공제 (8세 이상 자녀, 2025년 귀속 개정: 25만 / 55만 / 55만+40만×(n-2))
+    function childTaxCredit(n) {
+      if (n <= 0) return 0;
+      if (n === 1) return 250_000;
+      return 550_000 + Math.max(0, n - 2) * 400_000;
+    }
+
+    function calculateTax(f) {
+      // 1) 소득금액
+      const salary = f.salary;
+      const earnedDeduction = salary > 0 ? earnedIncomeDeduction(salary) : 0;
+      const earnedIncome = Math.max(0, salary - earnedDeduction);
+
+      const businessExpense = f.expenseMode === 'rate'
+        ? Math.floor(f.businessRevenue * (f.expenseRate / 100))
+        : f.businessExpense;
+      const businessIncome = Math.max(0, f.businessRevenue - businessExpense);
+
+      const otherIncome = Math.max(0, f.otherIncome);
+      const totalIncome = earnedIncome + businessIncome + otherIncome;
+
+      // 2) 소득공제
+      const personal = (1 + f.dependents) * 1_500_000;
+      const additional = f.seniors * 1_000_000 + f.disabled * 2_000_000
+        + (f.singleParent ? 1_000_000 : f.womanHead ? 500_000 : 0);
+      const otherDeductions = f.pension + f.otherDeduction;
+      const totalDeduction = Math.min(totalIncome, personal + additional + otherDeductions);
+
+      // 3) 과세표준 & 산출세액
+      const taxBase = Math.max(0, totalIncome - totalDeduction);
+      const bracket = findBracket(taxBase);
+      const calculatedTax = Math.max(0, Math.floor(taxBase * bracket.rate - bracket.deduction));
+
+      // 4) 세액공제
+      let earnedCredit = 0;
+      if (earnedIncome > 0 && totalIncome > 0) {
+        const share = calculatedTax * (earnedIncome / totalIncome);
+        const raw = share <= 1_300_000 ? share * 0.55 : 715_000 + (share - 1_300_000) * 0.3;
+        earnedCredit = Math.floor(Math.min(raw, earnedTaxCreditLimit(salary)));
+      }
+      const childCredit = childTaxCredit(f.children);
+      const standardCredit = f.useStandardCredit ? (salary > 0 ? 130_000 : 70_000) : 0;
+      const eFilingCredit = f.eFiling ? 20_000 : 0;
+      const credits = [
+        { label: '근로소득세액공제', value: earnedCredit },
+        { label: '자녀세액공제', value: childCredit },
+        { label: '표준세액공제', value: standardCredit },
+        { label: '전자신고세액공제', value: eFilingCredit },
+        { label: '기타 세액공제·감면', value: f.otherCredit },
+      ];
+      const totalCredit = Math.min(calculatedTax, credits.reduce((s, c) => s + c.value, 0));
+
+      // 5) 결정세액 & 납부/환급
+      const determinedTax = floor10(Math.max(0, calculatedTax - totalCredit));
+      const localTax = floor10(determinedTax * 0.1);
+      const prepaid = f.prepaid;
+      const payable = determinedTax - prepaid;            // 소득세 기준
+      const localPayable = localTax - f.prepaidLocal;     // 지방소득세 기준
+
+      return {
+        earnedDeduction, earnedIncome, businessExpense, businessIncome, otherIncome, totalIncome,
+        personal, additional, otherDeductions, totalDeduction,
+        taxBase, bracket, calculatedTax,
+        credits, totalCredit, determinedTax, localTax,
+        prepaid, payable, localPayable,
+        totalBurden: determinedTax + localTax,
+        effectiveRate: totalIncome > 0 ? (determinedTax + localTax) / totalIncome : 0,
+      };
+    }
+
+    const DEFAULT_FORM = {
+      salary: 0,
+      businessRevenue: 0, expenseMode: 'actual', businessExpense: 0, expenseRate: 60,
+      otherIncome: 0,
+      dependents: 0, seniors: 0, disabled: 0, womanHead: false, singleParent: false,
+      pension: 0, otherDeduction: 0,
+      children: 0, useStandardCredit: true, eFiling: true, otherCredit: 0,
+      prepaid: 0, prepaidLocal: 0,
+    };
+
+    const EXAMPLE_FORM = {
+      ...DEFAULT_FORM,
+      salary: 42_000_000,
+      businessRevenue: 30_000_000, businessExpense: 12_000_000,
+      otherIncome: 1_200_000,
+      dependents: 1, children: 1,
+      pension: 1_890_000,
+      prepaid: 2_100_000, prepaidLocal: 210_000,
+    };
+
+    function loadForm() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+        return saved ? { ...DEFAULT_FORM, ...saved } : DEFAULT_FORM;
+      } catch { return DEFAULT_FORM; }
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-indigo-600 text-white hover:bg-indigo-700 focus-visible:ring-indigo-500',
+        secondary: 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 focus-visible:ring-slate-400',
+        danger: 'bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-500',
+        ghost: 'text-slate-600 hover:bg-slate-100 focus-visible:ring-slate-400',
+      };
+      const sizes = { sm: 'px-3 py-1.5 text-sm', md: 'px-4 py-2 text-sm', lg: 'px-5 py-3 text-base' };
+      return (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ type = 'text', label, value, onChange, placeholder, error, disabled, hint, suffix, className = '', ...rest }) {
+      const id = useId();
+      return (
+        <div className={className}>
+          {label && <label htmlFor={id} className="block text-sm font-medium text-slate-700 mb-1">{label}</label>}
+          <div className="relative">
+            <input
+              id={id}
+              type={type}
+              value={value}
+              onChange={onChange}
+              placeholder={placeholder}
+              disabled={disabled}
+              aria-invalid={!!error}
+              aria-describedby={hint || error ? `${id}-desc` : undefined}
+              className={`w-full rounded-lg border px-3 py-2 text-right tabular-nums focus:outline-none focus:ring-2 disabled:bg-slate-100 disabled:text-slate-400 ${suffix ? 'pr-10' : ''} ${error ? 'border-rose-400 focus:ring-rose-300' : 'border-slate-300 focus:ring-indigo-300 focus:border-indigo-400'}`}
+              {...rest}
+            />
+            {suffix && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 pointer-events-none">{suffix}</span>}
+          </div>
+          {(error || hint) && (
+            <p id={`${id}-desc`} className={`mt-1 text-xs text-right ${error ? 'text-rose-600' : 'text-slate-400'}`}>{error || hint}</p>
+          )}
+        </div>
+      );
+    }
+
+    // 콤마 포맷 금액 입력 (숫자로 저장)
+    function MoneyInput({ value, onChange, ...rest }) {
+      const display = value ? value.toLocaleString('ko-KR') : '';
+      const handle = (e) => {
+        const digits = e.target.value.replace(/[^0-9]/g, '').slice(0, 13);
+        onChange(digits ? Number(digits) : 0);
+      };
+      return <Input inputMode="numeric" value={display} onChange={handle} placeholder="0" suffix="원" hint={toKoreanUnit(value)} {...rest} />;
+    }
+
+    function Stepper({ label, value, onChange, min = 0, max = 20 }) {
+      return (
+        <div className="flex items-center justify-between gap-3 py-1.5">
+          <span className="text-sm text-slate-700">{label}</span>
+          <div className="flex items-center rounded-lg border border-slate-300 bg-white" role="group" aria-label={label}>
+            <button type="button" aria-label={`${label} 감소`} onClick={() => onChange(Math.max(min, value - 1))}
+              className="w-8 h-8 text-slate-500 hover:bg-slate-100 rounded-l-lg disabled:opacity-30" disabled={value <= min}>−</button>
+            <span className="w-8 text-center text-sm tabular-nums" aria-live="polite">{value}</span>
+            <button type="button" aria-label={`${label} 증가`} onClick={() => onChange(Math.min(max, value + 1))}
+              className="w-8 h-8 text-slate-500 hover:bg-slate-100 rounded-r-lg disabled:opacity-30" disabled={value >= max}>+</button>
+          </div>
+        </div>
+      );
+    }
+
+    function Toggle({ label, checked, onChange, description }) {
+      return (
+        <label className="flex items-start justify-between gap-3 py-1.5 cursor-pointer">
+          <span>
+            <span className="text-sm text-slate-700">{label}</span>
+            {description && <span className="block text-xs text-slate-400">{description}</span>}
+          </span>
+          <span className="relative shrink-0">
+            <input type="checkbox" className="peer sr-only" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+            <span className="block w-10 h-6 rounded-full bg-slate-300 peer-checked:bg-indigo-600 transition peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-400 peer-focus-visible:ring-offset-2" />
+            <span className="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition peer-checked:translate-x-4" />
+          </span>
+        </label>
+      );
+    }
+
+    function SegmentedControl({ options, value, onChange, label }) {
+      return (
+        <div role="radiogroup" aria-label={label} className="inline-flex rounded-lg bg-slate-100 p-1">
+          {options.map((o) => (
+            <button key={o.value} type="button" role="radio" aria-checked={value === o.value} onClick={() => onChange(o.value)}
+              className={`px-3 py-1 text-sm rounded-md transition ${value === o.value ? 'bg-white shadow text-indigo-700 font-medium' : 'text-slate-500 hover:text-slate-700'}`}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function Card({ title, icon, action, className = '', children }) {
+      return (
+        <section className={`bg-white rounded-2xl shadow-sm border border-slate-200 p-5 ${className}`}>
+          {title && (
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-slate-900 flex items-center gap-2">
+                {icon && <span aria-hidden="true">{icon}</span>}{title}
+              </h2>
+              {action}
+            </div>
+          )}
+          {children}
+        </section>
+      );
+    }
+
+    function Badge({ color = 'slate', children }) {
+      const colors = {
+        slate: 'bg-slate-100 text-slate-600',
+        indigo: 'bg-indigo-100 text-indigo-700',
+        rose: 'bg-rose-100 text-rose-700',
+        emerald: 'bg-emerald-100 text-emerald-700',
+      };
+      return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${colors[color]}`}>{children}</span>;
+    }
+
+    function Modal({ isOpen, onClose, title, size = 'md', children }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [isOpen, onClose]);
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50" onClick={onClose}>
+          <div role="dialog" aria-modal="true" aria-label={title}
+            className={`fade-in w-full ${sizes[size]} max-h-[85vh] overflow-y-auto rounded-2xl bg-white shadow-xl`}
+            onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <h3 className="font-semibold text-slate-900">{title}</h3>
+              <button type="button" onClick={onClose} aria-label="닫기" className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+            </div>
+            <div className="p-5">{children}</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Row({ label, value, strong, minus, muted, indent }) {
+      return (
+        <div className={`flex justify-between gap-3 py-1 text-sm ${indent ? 'pl-3' : ''} ${muted ? 'text-slate-400' : ''}`}>
+          <span className={strong ? 'font-semibold text-slate-900' : ''}>{label}</span>
+          <span className={`tabular-nums ${strong ? 'font-semibold text-slate-900' : ''}`}>{minus && value > 0 ? '− ' : ''}{won(value)}</span>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Header({ onShowRates, onExample, onReset }) {
+      return (
+        <header className="bg-white border-b border-slate-200">
+          <div className="max-w-6xl mx-auto px-4 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900">🧾 종합소득세 계산기</h1>
+              <p className="text-sm text-slate-500 mt-0.5">2025년 귀속 (2026년 5월 신고) 세율 기준 · 간이 추정용</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={onShowRates}>📊 세율표</Button>
+              <Button variant="secondary" size="sm" onClick={onExample}>예시 입력</Button>
+              <Button variant="secondary" size="sm" onClick={onReset}>초기화</Button>
+            </div>
+          </div>
+        </header>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="max-w-6xl mx-auto px-4 py-8 text-xs text-slate-400 leading-relaxed">
+          본 계산기는 일반적인 공제 항목만 반영한 <b>참고용 추정치</b>입니다. 이자·배당 금융소득 종합과세, 연금소득, 분리과세 선택,
+          특별소득공제·특별세액공제(의료비·교육비·기부금 등), 기장 여부에 따른 가산세·감면 등은 반영되지 않았습니다.
+          정확한 세액은 국세청 홈택스 또는 세무 전문가를 통해 확인하세요.
+        </footer>
+      );
+    }
+
+    function RatesTable({ currentBase }) {
+      const current = findBracket(currentBase);
+      let prev = 0;
+      return (
+        <table className="w-full text-sm">
+          <caption className="sr-only">종합소득세 기본세율표</caption>
+          <thead>
+            <tr className="text-slate-500 border-b">
+              <th className="text-left font-medium py-2">과세표준</th>
+              <th className="text-right font-medium py-2">세율</th>
+              <th className="text-right font-medium py-2">누진공제</th>
+            </tr>
+          </thead>
+          <tbody>
+            {TAX_BRACKETS.map((b) => {
+              const from = prev; prev = b.limit;
+              const active = b === current && currentBase > 0;
+              return (
+                <tr key={b.limit} className={`border-b border-slate-100 ${active ? 'bg-indigo-50 font-semibold text-indigo-700' : ''}`}>
+                  <td className="py-2">
+                    {b.limit === Infinity ? `${toKoreanUnit(from)} 초과` : `${from ? toKoreanUnit(from) + ' 초과 ~ ' : ''}${toKoreanUnit(b.limit)} 이하`}
+                  </td>
+                  <td className="py-2 text-right">{Math.round(b.rate * 100)}%</td>
+                  <td className="py-2 text-right tabular-nums">{b.deduction ? won(b.deduction) : '-'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function InputPanel({ form, set }) {
+      const expenseError = form.expenseMode === 'actual' && form.businessExpense > form.businessRevenue && form.businessRevenue > 0
+        ? '필요경비가 수입금액보다 큽니다 (결손은 0원으로 처리)' : null;
+
+      return (
+        <div className="space-y-5">
+          <Card title="소득 입력" icon="💼">
+            <div className="space-y-5">
+              <MoneyInput label="근로소득 총급여 (비과세 제외)" value={form.salary} onChange={(v) => set('salary', v)} />
+
+              <div className="rounded-xl bg-slate-50 p-4 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <span className="text-sm font-medium text-slate-700">사업소득 (프리랜서 3.3% 포함)</span>
+                  <SegmentedControl label="필요경비 방식" value={form.expenseMode} onChange={(v) => set('expenseMode', v)}
+                    options={[{ value: 'actual', label: '실제 경비' }, { value: 'rate', label: '경비율' }]} />
+                </div>
+                <MoneyInput label="수입금액 (매출)" value={form.businessRevenue} onChange={(v) => set('businessRevenue', v)} />
+                {form.expenseMode === 'actual' ? (
+                  <MoneyInput label="필요경비" value={form.businessExpense} onChange={(v) => set('businessExpense', v)} error={expenseError} />
+                ) : (
+                  <Input label="단순경비율" type="number" inputMode="decimal" min="0" max="100" step="0.1" suffix="%"
+                    value={form.expenseRate}
+                    onChange={(e) => set('expenseRate', Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+                    hint="업종코드별 경비율은 홈택스에서 조회할 수 있어요" />
+                )}
+              </div>
+
+              <MoneyInput label="기타소득금액 (필요경비 차감 후)" value={form.otherIncome} onChange={(v) => set('otherIncome', v)} />
+            </div>
+          </Card>
+
+          <Card title="소득공제" icon="👨‍👩‍👧">
+            <div className="divide-y divide-slate-100">
+              <div className="pb-2">
+                <p className="text-xs text-slate-400 mb-1">기본공제: 본인 포함 1인당 150만원</p>
+                <Stepper label="부양가족 수 (본인 제외)" value={form.dependents} onChange={(v) => set('dependents', v)} />
+              </div>
+              <div className="py-2">
+                <p className="text-xs text-slate-400 mb-1">추가공제</p>
+                <Stepper label="경로우대 (70세 이상) · 100만원" value={form.seniors} onChange={(v) => set('seniors', v)} max={form.dependents + 1} />
+                <Stepper label="장애인 · 200만원" value={form.disabled} onChange={(v) => set('disabled', v)} max={form.dependents + 1} />
+                <Toggle label="한부모 · 100만원" checked={form.singleParent} onChange={(v) => set('singleParent', v)} />
+                <Toggle label="부녀자 · 50만원" description="종합소득금액 3천만원 이하, 한부모와 중복 불가"
+                  checked={form.womanHead && !form.singleParent} onChange={(v) => set('womanHead', v)} />
+              </div>
+              <div className="pt-3 grid sm:grid-cols-2 gap-3">
+                <MoneyInput label="국민연금 보험료" value={form.pension} onChange={(v) => set('pension', v)} />
+                <MoneyInput label="기타 소득공제" value={form.otherDeduction} onChange={(v) => set('otherDeduction', v)} title="노란우산공제 등" />
+              </div>
+            </div>
+          </Card>
+
+          <Card title="세액공제 · 기납부세액" icon="🎁">
+            <div className="divide-y divide-slate-100">
+              <div className="pb-2">
+                <Stepper label="8세 이상 자녀 수" value={form.children} onChange={(v) => set('children', v)} />
+                <Toggle label="표준세액공제 적용" description={form.salary > 0 ? '근로소득자 13만원 (특별세액공제 미신청 시)' : '7만원 (특별세액공제 미신청 시)'}
+                  checked={form.useStandardCredit} onChange={(v) => set('useStandardCredit', v)} />
+                <Toggle label="전자신고세액공제" description="홈택스 직접 신고 시 2만원"
+                  checked={form.eFiling} onChange={(v) => set('eFiling', v)} />
+              </div>
+              <div className="pt-3 grid sm:grid-cols-2 gap-3">
+                <MoneyInput label="기타 세액공제·감면" value={form.otherCredit} onChange={(v) => set('otherCredit', v)} className="sm:col-span-2" />
+                <MoneyInput label="기납부 소득세" value={form.prepaid} onChange={(v) => set('prepaid', v)} />
+                <MoneyInput label="기납부 지방소득세" value={form.prepaidLocal} onChange={(v) => set('prepaidLocal', v)} />
+              </div>
+              <p className="pt-2 text-xs text-slate-400">기납부세액: 근로소득 원천징수 결정세액 + 사업소득 원천징수(3%) + 중간예납세액</p>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    function ResultPanel({ r, onShowRates }) {
+      const total = r.payable + r.localPayable;
+      const isRefund = total < 0;
+      const hasIncome = r.totalIncome > 0;
+
+      if (!hasIncome) {
+        return (
+          <Card className="text-center py-12">
+            <div className="text-4xl mb-3" aria-hidden="true">🧮</div>
+            <p className="font-medium text-slate-700">소득을 입력하면 세액이 계산돼요</p>
+            <p className="text-sm text-slate-400 mt-1">상단의 <b>예시 입력</b>으로 바로 확인해 볼 수도 있어요</p>
+          </Card>
+        );
+      }
+
+      return (
+        <div className="space-y-5" aria-live="polite">
+          <section className={`rounded-2xl p-6 text-white shadow-md ${isRefund ? 'bg-gradient-to-br from-emerald-500 to-teal-600' : 'bg-gradient-to-br from-indigo-600 to-violet-600'}`}>
+            <p className="text-sm opacity-90">{isRefund ? '예상 환급세액' : '예상 추가 납부세액'} (지방소득세 포함)</p>
+            <p className="text-3xl sm:text-4xl font-bold tabular-nums mt-1">{won(Math.abs(total))}</p>
+            <p className="text-sm opacity-80 mt-1">{toKoreanUnit(Math.abs(total)) || '0원'}</p>
+            <div className="grid grid-cols-3 gap-2 mt-5 text-center">
+              {[
+                ['총 세부담', won(r.totalBurden)],
+                ['실효세율', pct(r.effectiveRate)],
+                ['적용 세율', `${Math.round(r.bracket.rate * 100)}%`],
+              ].map(([k, v]) => (
+                <div key={k} className="rounded-xl bg-white/15 py-2 px-1">
+                  <p className="text-[11px] opacity-80">{k}</p>
+                  <p className="text-sm font-semibold tabular-nums truncate">{v}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <Card title="계산 내역" icon="📋" action={<Button variant="ghost" size="sm" onClick={onShowRates}>세율표</Button>}>
+            <div className="space-y-3">
+              <div>
+                <Row label="근로소득금액" value={r.earnedIncome} />
+                {r.earnedDeduction > 0 && <Row label="ㄴ 근로소득공제" value={r.earnedDeduction} minus muted indent />}
+                <Row label="사업소득금액" value={r.businessIncome} />
+                {r.businessExpense > 0 && <Row label="ㄴ 필요경비" value={r.businessExpense} minus muted indent />}
+                <Row label="기타소득금액" value={r.otherIncome} />
+                <div className="border-t border-slate-200 mt-1 pt-1"><Row label="종합소득금액" value={r.totalIncome} strong /></div>
+              </div>
+
+              <div>
+                <Row label="기본공제" value={r.personal} minus />
+                {r.additional > 0 && <Row label="추가공제" value={r.additional} minus />}
+                {r.otherDeductions > 0 && <Row label="연금보험료·기타공제" value={r.otherDeductions} minus />}
+                <div className="border-t border-slate-200 mt-1 pt-1"><Row label="과세표준" value={r.taxBase} strong /></div>
+                <div className="flex justify-end"><Badge color="indigo">{Math.round(r.bracket.rate * 100)}% 구간 · 누진공제 {won(r.bracket.deduction)}</Badge></div>
+              </div>
+
+              <div>
+                <Row label="산출세액" value={r.calculatedTax} strong />
+                {r.credits.filter((c) => c.value > 0).map((c) => <Row key={c.label} label={c.label} value={c.value} minus muted indent />)}
+                {r.totalCredit < r.credits.reduce((s, c) => s + c.value, 0) && (
+                  <p className="text-xs text-amber-600 text-right">세액공제는 산출세액을 한도로 적용됩니다</p>
+                )}
+              </div>
+
+              <div className="rounded-xl bg-slate-50 p-3">
+                <Row label="결정세액 (소득세)" value={r.determinedTax} strong />
+                <Row label="지방소득세 (10%)" value={r.localTax} />
+                <Row label="기납부세액" value={r.prepaid} minus muted />
+                <div className="border-t border-slate-200 mt-1 pt-1 text-sm flex justify-between">
+                  <span>소득세 {r.payable < 0 ? '환급' : '납부'}</span>
+                  <span className={`tabular-nums font-medium ${r.payable < 0 ? 'text-emerald-600' : 'text-indigo-700'}`}>{won(Math.abs(r.payable))}</span>
+                </div>
+                <div className="text-sm flex justify-between">
+                  <span>지방소득세 {r.localPayable < 0 ? '환급' : '납부'}</span>
+                  <span className={`tabular-nums font-medium ${r.localPayable < 0 ? 'text-emerald-600' : 'text-indigo-700'}`}>{won(Math.abs(r.localPayable))}</span>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    function CalculatorPage() {
+      const [form, setForm] = useState(loadForm);
+      const [ratesOpen, setRatesOpen] = useState(false);
+
+      const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+      const result = useMemo(() => calculateTax(form), [form]);
+
+      useEffect(() => {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(form)); } catch {}
+      }, [form]);
+
+      return (
+        <>
+          <Header
+            onShowRates={() => setRatesOpen(true)}
+            onExample={() => setForm(EXAMPLE_FORM)}
+            onReset={() => setForm(DEFAULT_FORM)}
+          />
+          <main className="max-w-6xl mx-auto px-4 py-6 grid lg:grid-cols-5 gap-5">
+            <div className="lg:col-span-3">
+              <InputPanel form={form} set={set} />
+            </div>
+            <div className="lg:col-span-2">
+              <div className="lg:sticky lg:top-5">
+                <ResultPanel r={result} onShowRates={() => setRatesOpen(true)} />
+              </div>
+            </div>
+          </main>
+          <Footer />
+          <Modal isOpen={ratesOpen} onClose={() => setRatesOpen(false)} title="종합소득세 기본세율 (2023년 귀속~)" size="lg">
+            <RatesTable currentBase={result.taxBase} />
+            <p className="text-xs text-slate-500 mt-3">산출세액 = 과세표준 × 세율 − 누진공제액 · 지방소득세는 결정세액의 10%가 별도로 부과됩니다.</p>
+          </Modal>
+        </>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return <CalculatorPage />;
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

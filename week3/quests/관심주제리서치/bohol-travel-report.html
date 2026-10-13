@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>보홀 여행 리포트</title>
+<style>
+  :root {
+    --bg: #f7f5f0;
+    --card: #ffffff;
+    --text: #1f2328;
+    --muted: #5f6670;
+    --line: #e3dfd6;
+    --accent: #0f7c80;
+    --accent-soft: #e2f2f2;
+    --warn: #b45309;
+    --warn-soft: #fdf1e3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181b;
+      --card: #1e2226;
+      --text: #e8eaed;
+      --muted: #a0a7b0;
+      --line: #30363d;
+      --accent: #4fc3c7;
+      --accent-soft: #173235;
+      --warn: #f0a75a;
+      --warn-soft: #33261a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    line-height: 1.65;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 56px; }
+  header { margin-bottom: 28px; }
+  .eyebrow { color: var(--accent); font-weight: 700; font-size: 14px; letter-spacing: .04em; }
+  h1 { margin: 4px 0 8px; font-size: 32px; line-height: 1.25; }
+  .meta { color: var(--muted); font-size: 14px; }
+  h2 { font-size: 20px; margin: 0 0 12px; }
+  section {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 18px;
+  }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  td.day { font-weight: 700; white-space: nowrap; color: var(--accent); }
+  ul { margin: 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  .note {
+    background: var(--warn-soft);
+    color: var(--text);
+    border-left: 4px solid var(--warn);
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 14px;
+    margin-top: 12px;
+  }
+  .conclusion { background: var(--accent-soft); border-color: var(--accent); }
+  .conclusion ol { margin: 0; padding-left: 20px; }
+  .conclusion li { margin: 8px 0; }
+  .src { color: var(--muted); font-size: 13px; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">WEEK3 QUEST · PLAYWRIGHT 검색 리포트</div>
+    <h1>필리핀 보홀 3박 4일 여행 리포트</h1>
+    <div class="meta">여행 일정: 2026년 10월 17일(토) ~ 10월 20일(화) · 조사일: 2026년 10월 13일</div>
+    <div class="meta">조사한 사이트: 네이버 여행정보 · 위키백과(한국어) · 위키보이지(영문)</div>
+  </header>
+
+  <section>
+    <h2>1. 여행 기본 정보</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>항목</th><th>내용</th><th>출처</th></tr>
+        <tr><td>위치</td><td>필리핀 중부 비사야 제도, 세부섬 남동쪽 (필리핀에서 10번째로 큰 섬)</td><td class="src">위키백과</td></tr>
+        <tr><td>항공</td><td>인천 → 보홀 팡라오(TAG) 직항 약 4시간 45분 (제주항공)</td><td class="src">네이버</td></tr>
+        <tr><td>항공권 시세</td><td>인천 왕복 266,000원부터 (10/14~10/18 날짜 기준 참고가)</td><td class="src">네이버</td></tr>
+        <tr><td>비자</td><td>무비자 30일, 출발 전 <b>eTravel 온라인 입국신고</b> 필요</td><td class="src">네이버</td></tr>
+        <tr><td>환율 · 물가</td><td>1페소 ≈ 21.39원, 한국보다 저렴</td><td class="src">네이버</td></tr>
+        <tr><td>시차 · 전압</td><td>한국보다 1시간 느림 · 220V 60Hz</td><td class="src">네이버</td></tr>
+        <tr><td>언어</td><td>영어, 세부아노어, 보홀라노어</td><td class="src">위키백과</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 10월 날씨</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>항목</th><th>내용</th></tr>
+        <tr><td>평균 기온</td><td>최고 29.6° / 최저 26.2°</td></tr>
+        <tr><td>날씨 특징</td><td>8~10월은 남서 계절풍 영향으로 맑은 날이 이어지거나 비가 계속 오는 등 날씨를 예측하기 어려움</td></tr>
+        <tr><td>베스트 시즌</td><td>11~4월이 가장 쾌적함 (네이버 추천 시기는 1~4월)</td></tr>
+        <tr><td>태풍</td><td>레이테·사마르섬 산지가 막아주는 덕분에 직접 피해는 비교적 적은 편</td></tr>
+      </table>
+    </div>
+    <div class="note">10월은 우기 끝무렵이에요. 우산이나 우비를 챙기고, 호핑투어는 날씨를 보고 바꿀 수 있게 일정 중간(2~3일차)에 넣는 게 좋아요.</div>
+  </section>
+
+  <section>
+    <h2>3. 꼭 가볼 곳</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>장소</th><th>특징</th><th>분류</th></tr>
+        <tr><td>초콜릿 힐 (카르멘)</td><td>30~50m 높이 원뿔형 언덕 1,268개, 보홀 대표 명소</td><td>육상</td></tr>
+        <tr><td>안경원숭이 보호구역 (코렐라)</td><td>세계에서 가장 작은 영장류 중 하나. 야행성이라 조용히 관람</td><td>육상</td></tr>
+        <tr><td>로복강 크루즈</td><td>열대 숲 사이를 유람선으로 이동, 선상 뷔페와 공연</td><td>육상</td></tr>
+        <tr><td>알로나 비치 (팡라오)</td><td>가장 인기 있는 해변, 리조트와 식당이 몰려 있음</td><td>해변</td></tr>
+        <tr><td>발리카삭</td><td>거북이와 산호를 볼 수 있는 세계적인 다이빙 명소</td><td>바다</td></tr>
+        <tr><td>나팔링</td><td>정어리 떼와 잭피쉬를 볼 수 있는 스노클링 포인트</td><td>바다</td></tr>
+        <tr><td>버진 아일랜드</td><td>호핑투어 때 들르는 모래톱 섬</td><td>바다</td></tr>
+        <tr><td>안다 (Anda)</td><td>남동쪽 끝의 조용한 해변, 모래가 곱고 하얌 (공항에서 멂)</td><td>해변</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 맛집 · 마사지</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>이름</th><th>네이버 평점</th><th>메모</th></tr>
+        <tr><td>몬스터 크랩 시푸드</td><td>5.0 (리뷰 164)</td><td>리뷰가 가장 많은 해산물 식당</td></tr>
+        <tr><td>점보 크랩</td><td>4.7 (리뷰 17)</td><td>해산물</td></tr>
+        <tr><td>우베코</td><td>4.9 (리뷰 11)</td><td>인스타 감성 디저트로 유명</td></tr>
+        <tr><td>레드크랩</td><td>4.4 (리뷰 31)</td><td>해산물</td></tr>
+        <tr><td>보홀 빠우</td><td>4.1 (리뷰 23)</td><td>현장 대기가 있을 만큼 인기</td></tr>
+        <tr><td>보홀 비 팜</td><td>4.6 (리뷰 10)</td><td>유기농 농장 레스토랑</td></tr>
+      </table>
+    </div>
+    <p class="src">마사지: 연스파, 타이거스파, 해피풋스파 등이 자주 언급됨 (무료 픽업·드롭 해주는 곳 많음)</p>
+  </section>
+
+  <section>
+    <h2>5. 추천 일정 (10/17 ~ 10/20)</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>날짜</th><th>일정</th></tr>
+        <tr><td class="day">10/17 (토)</td><td>인천 출발 → 팡라오 공항 도착 → 알로나 비치 근처 숙소 체크인, 도착 시간에 따라 해변 산책이나 저녁 식사</td></tr>
+        <tr><td class="day">10/18 (일)</td><td><b>호핑투어</b>: 발리카삭(거북이) · 나팔링 · 버진 아일랜드 → 오후 마사지 → 저녁 해산물 (몬스터 크랩 등)</td></tr>
+        <tr><td class="day">10/19 (월)</td><td><b>육상투어</b>: 로복강 크루즈(점심 뷔페) → 안경원숭이 보호구역 → 초콜릿 힐<br><span class="src">비가 오면 18일과 바꾸기</span></td></tr>
+        <tr><td class="day">10/20 (화)</td><td>체크아웃 → 우베코 · 기념품 쇼핑 → 공항 이동 → 귀국</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. 준비물 체크리스트</h2>
+    <ul>
+      <li>여권 (유효기간 6개월 이상 남았는지 확인)</li>
+      <li>eTravel 입국신고 (출국 전 온라인 등록)</li>
+      <li>그랩(Grab) 앱, 이심이나 유심</li>
+      <li>페소 현금 (팁 문화는 없지만 작은 가게나 툭툭은 현금 위주)</li>
+      <li>우산이나 우비, 래시가드, 아쿠아슈즈, 선크림</li>
+    </ul>
+  </section>
+
+  <section class="conclusion">
+    <h2>결론</h2>
+    <ol>
+      <li><b>3박 4일이면 충분해요.</b> 실제로 쓸 수 있는 날은 18·19일 이틀이니 <b>호핑투어 하루, 육상투어 하루</b>로 나누는 게 가장 효율적이에요.</li>
+      <li><b>숙소는 팡라오섬 알로나 비치 근처</b>를 추천해요. 공항, 해변, 식당, 투어 출발지가 모두 가까워요.</li>
+      <li><b>10월은 날씨가 변덕스러워요.</b> 바다 일정은 날씨를 보고 하루 앞당기거나 미룰 수 있게 해두세요.</li>
+      <li><b>항공권은 빨리 예약하세요.</b> 출발이 4일밖에 안 남았어요. 조사한 가격(266,000원부터)은 다른 날짜 기준이라 17~20일 실제 가격은 다시 확인해야 해요.</li>
+      <li>출국 전에 <b>eTravel 입국신고</b>는 꼭 해두세요.</li>
+    </ol>
+  </section>
+
+  <footer>
+    Playwright MCP로 네이버 여행정보, 위키백과 「보홀섬」, 위키보이지 「Bohol」을 검색해서 정리했어요 (2026-10-13 기준).
+    트립어드바이저는 자동 접속을 차단해서(403) 조사에서 빠졌어요. 가격과 영업 정보는 바뀔 수 있어요.
+  </footer>
+</main>
+</body>
+</html>

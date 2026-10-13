@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>나만의 ChatGPT</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN은 버전 고정. Babel 은 반드시 7.x -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+  <style>
+    /* 마크다운 응답 스타일 (Tailwind 유틸리티로 표현하기 어려운 하위 셀렉터) */
+    .md > * + * { margin-top: 0.75em; }
+    .md h1, .md h2, .md h3 { font-weight: 700; line-height: 1.3; }
+    .md h1 { font-size: 1.35em; } .md h2 { font-size: 1.2em; } .md h3 { font-size: 1.05em; }
+    .md ul { list-style: disc; padding-left: 1.4em; }
+    .md ol { list-style: decimal; padding-left: 1.4em; }
+    .md li + li { margin-top: 0.25em; }
+    .md a { color: #059669; text-decoration: underline; }
+    .md code { background: rgba(0,0,0,0.06); padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.9em; }
+    .md pre { background: #0f172a; color: #e2e8f0; padding: 0.9em 1em; border-radius: 10px; overflow-x: auto; font-size: 0.85em; }
+    .md pre code { background: none; padding: 0; color: inherit; }
+    .md blockquote { border-left: 3px solid #cbd5e1; padding-left: 0.9em; color: #475569; }
+    .md table { border-collapse: collapse; display: block; overflow-x: auto; }
+    .md th, .md td { border: 1px solid #e2e8f0; padding: 0.35em 0.7em; }
+    .cursor-blink::after { content: '▍'; animation: blink 1s steps(1) infinite; margin-left: 2px; color: #10b981; }
+    @keyframes blink { 50% { opacity: 0; } }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useRef, useReducer, useMemo, useCallback } = React;
+
+    // ========================================
+    // ⚙️ Constants & Utils
+    // ========================================
+    // OpenAI 공식 엔드포인트 (외부 API이므로 절대 경로 사용)
+    const API_BASE_URL = 'https://api.openai.com/v1';
+    const STORAGE_KEYS = { apiKey: 'mygpt.apiKey', settings: 'mygpt.settings', chats: 'mygpt.chats' };
+    const MODEL_OPTIONS = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'];
+    const REPLY_SUFFIX = '🤍'; // 모든 AI 답변 끝에 반드시 붙는 하얀 하트
+    const LEGACY_SYSTEM_PROMPT = '너는 친절하고 똑똑한 한국어 AI 비서야. 답변은 핵심부터 간결하게 하고, 필요하면 마크다운을 사용해.';
+    const DEFAULT_SETTINGS = {
+      model: 'gpt-4o-mini',
+      systemPrompt: [
+        '너는 공주님을 모시는 충직하고 품위 있는 집사야. 사용자를 항상 "공주님"이라고 부르며 극진히 모셔.',
+        '- 말투: 정중하고 우아한 존댓말 ("~하옵니다", "~이옵니다", "분부대로 하겠사옵니다" 등을 자연스럽게 섞어서)',
+        '- 태도: 공주님의 질문 하나하나를 귀하게 여기고, 따뜻하게 걱정하고 챙겨드려',
+        '- 내용: 집사답게 유능해야 해. 답변은 정확하고 핵심부터 전하며, 필요하면 마크다운을 사용해',
+        `- 규칙: 모든 답변의 맨 마지막은 반드시 하얀 하트 ${REPLY_SUFFIX} 로 끝내`,
+      ].join('\n'),
+      temperature: 0.7,
+    };
+
+    const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+    const storage = {
+      get(key, fallback) {
+        try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); }
+        catch { return fallback; }
+      },
+      set(key, value) {
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* 저장 불가 환경 무시 */ }
+      },
+    };
+
+    const renderMarkdown = (text) =>
+      DOMPurify.sanitize(marked.parse(text || '', { breaks: true, gfm: true }));
+
+    // OpenAI Chat Completions 스트리밍 호출
+    async function streamChat({ apiKey, model, temperature, messages, signal, onDelta }) {
+      const res = await fetch(`${API_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, temperature, messages, stream: true }),
+        signal,
+      });
+
+      if (!res.ok) {
+        let msg = `요청 실패 (${res.status})`;
+        let code = '';
+        try {
+          const err = await res.json();
+          if (err?.error?.message) msg = err.error.message;
+          code = err?.error?.code || err?.error?.type || '';
+        } catch {}
+        if (res.status === 401) msg = 'API 키가 올바르지 않습니다. 설정에서 키를 확인해 주세요.';
+        else if (res.status === 429 && /quota|credit/i.test(code)) {
+          msg = 'OpenAI 계정에 크레딧(잔액)이 없어 답변을 받을 수 없습니다. platform.openai.com → Billing 에서 충전한 뒤 다시 시도해 주세요.';
+        } else if (res.status === 429) msg = '요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.';
+        throw new Error(msg);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const data = trimmed.slice(5).trim();
+          if (data === '[DONE]') return;
+          try {
+            const delta = JSON.parse(data).choices?.[0]?.delta?.content;
+            if (delta) onDelta(delta);
+          } catch { /* 불완전한 청크는 무시 */ }
+        }
+      }
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:ring-emerald-500',
+        secondary: 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 focus-visible:ring-slate-400',
+        danger: 'bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-500',
+        ghost: 'bg-transparent text-slate-600 hover:bg-slate-200/70 focus-visible:ring-slate-400',
+      };
+      const sizes = { sm: 'px-2.5 py-1.5 text-sm', md: 'px-4 py-2 text-sm', lg: 'px-5 py-3 text-base' };
+      return (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ type = 'text', label, value, onChange, placeholder, error, disabled, id, className = '', hint }) {
+      const inputId = id || useMemo(uid, []);
+      return (
+        <div className={className}>
+          {label && <label htmlFor={inputId} className="block text-sm font-medium text-slate-700 mb-1">{label}</label>}
+          <input
+            id={inputId}
+            type={type}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            aria-invalid={!!error}
+            className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${error ? 'border-rose-400 focus:ring-rose-300' : 'border-slate-300 focus:ring-emerald-300'} disabled:bg-slate-100`}
+          />
+          {hint && !error && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+          {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
+        </div>
+      );
+    }
+
+    function Textarea({ label, value, onChange, placeholder, rows = 3, id, className = '' }) {
+      const inputId = id || useMemo(uid, []);
+      return (
+        <div className={className}>
+          {label && <label htmlFor={inputId} className="block text-sm font-medium text-slate-700 mb-1">{label}</label>}
+          <textarea
+            id={inputId}
+            rows={rows}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 resize-y"
+          />
+        </div>
+      );
+    }
+
+    function Select({ label, value, onChange, options, id, className = '' }) {
+      const inputId = id || useMemo(uid, []);
+      return (
+        <div className={className}>
+          {label && <label htmlFor={inputId} className="block text-sm font-medium text-slate-700 mb-1">{label}</label>}
+          <select
+            id={inputId}
+            value={value}
+            onChange={onChange}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
+          >
+            {options.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, children, size = 'md' }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [isOpen, onClose]);
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
+          <div className="absolute inset-0 bg-slate-900/50" onClick={onClose} />
+          <div className={`relative w-full ${sizes[size]} rounded-2xl bg-white shadow-xl max-h-[90vh] overflow-y-auto`}>
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <h2 className="text-lg font-semibold">{title}</h2>
+              <button onClick={onClose} className="rounded-md p-1 text-slate-500 hover:bg-slate-100" aria-label="닫기">✕</button>
+            </div>
+            <div className="p-5">{children}</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Badge({ children, className = '' }) {
+      return <span className={`inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ${className}`}>{children}</span>;
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Sidebar({ chats, activeId, onSelect, onNew, onDelete, onOpenSettings, isOpen, onClose }) {
+      return (
+        <>
+          {isOpen && <div className="fixed inset-0 z-30 bg-slate-900/40 md:hidden" onClick={onClose} />}
+          <aside
+            className={`fixed z-40 inset-y-0 left-0 w-72 bg-slate-900 text-slate-100 flex flex-col transition-transform md:static md:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
+            aria-label="대화 목록"
+          >
+            <div className="p-3">
+              <button
+                onClick={onNew}
+                className="w-full flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2.5 text-sm hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+              >
+                <span className="text-lg leading-none">＋</span> 새 대화
+              </button>
+            </div>
+            <nav className="flex-1 overflow-y-auto px-2 pb-2 space-y-1">
+              {chats.length === 0 && <p className="px-3 py-6 text-center text-sm text-slate-500">아직 대화가 없어요</p>}
+              {chats.map((c) => (
+                <div
+                  key={c.id}
+                  className={`group flex items-center rounded-lg ${c.id === activeId ? 'bg-slate-700' : 'hover:bg-slate-800'}`}
+                >
+                  <button
+                    onClick={() => onSelect(c.id)}
+                    className="flex-1 truncate px-3 py-2 text-left text-sm focus:outline-none"
+                    aria-current={c.id === activeId ? 'true' : undefined}
+                  >
+                    💬 {c.title}
+                  </button>
+                  <button
+                    onClick={() => onDelete(c.id)}
+                    className="mr-1 rounded p-1 text-slate-400 opacity-0 hover:text-rose-400 group-hover:opacity-100 focus:opacity-100"
+                    aria-label={`${c.title} 삭제`}
+                  >
+                    🗑
+                  </button>
+                </div>
+              ))}
+            </nav>
+            <div className="border-t border-slate-800 p-3">
+              <button
+                onClick={onOpenSettings}
+                className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-slate-800"
+              >
+                ⚙️ 설정 · API 키
+              </button>
+            </div>
+          </aside>
+        </>
+      );
+    }
+
+    function ChatHeader({ title, model, onToggleSidebar }) {
+      return (
+        <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3">
+          <button onClick={onToggleSidebar} className="md:hidden rounded-md p-1.5 hover:bg-slate-100" aria-label="메뉴 열기">☰</button>
+          <h1 className="flex-1 truncate font-semibold">{title}</h1>
+          <Badge>{model}</Badge>
+        </header>
+      );
+    }
+
+    function MessageBubble({ role, content, streaming }) {
+      const isUser = role === 'user';
+      const html = useMemo(() => (isUser ? null : renderMarkdown(content)), [content, isUser]);
+      return (
+        <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
+          {!isUser && <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-sm text-white" aria-hidden="true">AI</div>}
+          <div
+            className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed ${isUser ? 'bg-emerald-600 text-white rounded-br-sm whitespace-pre-wrap' : 'bg-white border border-slate-200 rounded-bl-sm'}`}
+          >
+            {isUser
+              ? content
+              : <div className={`md break-words ${streaming ? 'cursor-blink' : ''}`} dangerouslySetInnerHTML={{ __html: html || (streaming ? '' : '<p></p>') }} />}
+          </div>
+        </div>
+      );
+    }
+
+    function Composer({ onSend, onStop, isStreaming, disabled }) {
+      const [text, setText] = useState('');
+      const ref = useRef(null);
+
+      useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+      }, [text]);
+
+      const submit = () => {
+        const t = text.trim();
+        if (!t || isStreaming || disabled) return;
+        onSend(t);
+        setText('');
+      };
+
+      return (
+        <div className="border-t border-slate-200 bg-white p-3 sm:p-4">
+          <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-slate-300 bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-emerald-300">
+            <label htmlFor="composer" className="sr-only">메시지 입력</label>
+            <textarea
+              id="composer"
+              ref={ref}
+              rows={1}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); }
+              }}
+              placeholder={disabled ? '먼저 설정에서 API 키를 입력해 주세요' : '메시지를 입력하세요 (Shift+Enter 줄바꿈)'}
+              disabled={disabled}
+              className="flex-1 resize-none bg-transparent py-1.5 text-[15px] focus:outline-none disabled:cursor-not-allowed"
+            />
+            {isStreaming
+              ? <Button variant="secondary" size="sm" onClick={onStop} aria-label="응답 중지">■ 중지</Button>
+              : <Button size="sm" onClick={submit} disabled={!text.trim() || disabled} aria-label="보내기">전송 ↑</Button>}
+          </div>
+          <p className="mt-2 text-center text-xs text-slate-400">AI 답변은 틀릴 수 있어요. 중요한 정보는 확인해 주세요.</p>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function WelcomeView({ hasKey, onOpenSettings, onPick }) {
+      const examples = ['오늘 저녁 메뉴 추천해줘', '자바스크립트 Promise를 쉽게 설명해줘', '이메일을 정중하게 다듬어줘', '주말 서울 나들이 코스 짜줘'];
+      return (
+        <div className="flex h-full flex-col items-center justify-center px-4 text-center">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 text-2xl text-white">✨</div>
+          <h2 className="text-2xl font-bold">공주님, 무엇을 도와드릴까요? {REPLY_SUFFIX}</h2>
+          {!hasKey ? (
+            <div className="mt-6 max-w-sm rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              <p className="mb-3">시작하려면 OpenAI API 키가 필요해요. 키는 이 브라우저에만 저장됩니다.</p>
+              <Button onClick={onOpenSettings}>API 키 입력하기</Button>
+            </div>
+          ) : (
+            <div className="mt-8 grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+              {examples.map((ex) => (
+                <button
+                  key={ex}
+                  onClick={() => onPick(ex)}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm hover:border-emerald-300 hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function ChatView({ chat, streamingId, error, onRetry }) {
+      const bottomRef = useRef(null);
+      useEffect(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, [chat?.messages]);
+
+      return (
+        <div className="mx-auto max-w-3xl space-y-5 px-3 py-6 sm:px-4" aria-live="polite">
+          {chat.messages.map((m) => (
+            <MessageBubble key={m.id} role={m.role} content={m.content} streaming={m.id === streamingId} />
+          ))}
+          {streamingId && !chat.messages.find((m) => m.id === streamingId)?.content && (
+            <div className="flex items-center gap-2 pl-11 text-sm text-slate-400" role="status">
+              <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500" />
+              생각 중...
+            </div>
+          )}
+          {error && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700" role="alert">
+              <p className="mb-2">⚠️ {error}</p>
+              <Button variant="danger" size="sm" onClick={onRetry}>다시 시도</Button>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+      );
+    }
+
+    function SettingsModal({ isOpen, onClose, apiKey, settings, onSave }) {
+      const [key, setKey] = useState(apiKey);
+      const [form, setForm] = useState(settings);
+      const [showKey, setShowKey] = useState(false);
+
+      useEffect(() => {
+        if (isOpen) { setKey(apiKey); setForm(settings); setShowKey(false); }
+      }, [isOpen]);
+
+      const keyError = key && !key.startsWith('sk-') ? 'OpenAI 키는 보통 sk- 로 시작해요' : '';
+
+      return (
+        <Modal isOpen={isOpen} onClose={onClose} title="설정">
+          <div className="space-y-4">
+            <div>
+              <Input
+                type={showKey ? 'text' : 'password'}
+                label="OpenAI API 키"
+                value={key}
+                onChange={(e) => setKey(e.target.value.trim())}
+                placeholder="sk-..."
+                error={keyError}
+                hint="키는 이 브라우저의 localStorage에만 저장되고 OpenAI로만 전송됩니다."
+              />
+              <button onClick={() => setShowKey((s) => !s)} className="mt-1 text-xs text-emerald-700 hover:underline">
+                {showKey ? '키 숨기기' : '키 보기'}
+              </button>
+            </div>
+            <Select
+              label="모델"
+              value={MODEL_OPTIONS.includes(form.model) ? form.model : MODEL_OPTIONS[0]}
+              onChange={(e) => setForm({ ...form, model: e.target.value })}
+              options={MODEL_OPTIONS}
+            />
+            <div>
+              <label htmlFor="temp" className="mb-1 flex justify-between text-sm font-medium text-slate-700">
+                <span>창의성 (temperature)</span><span className="text-slate-500">{form.temperature}</span>
+              </label>
+              <input
+                id="temp" type="range" min="0" max="1.5" step="0.1"
+                value={form.temperature}
+                onChange={(e) => setForm({ ...form, temperature: Number(e.target.value) })}
+                className="w-full accent-emerald-600"
+              />
+            </div>
+            <Textarea
+              label="시스템 프롬프트 (AI 성격·역할)"
+              rows={4}
+              value={form.systemPrompt}
+              onChange={(e) => setForm({ ...form, systemPrompt: e.target.value })}
+            />
+            <div className="flex flex-wrap justify-between gap-2 pt-2">
+              <Button variant="ghost" onClick={() => { setKey(''); }}>키 지우기</Button>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={onClose}>취소</Button>
+                <Button onClick={() => { onSave(key, form); onClose(); }}>저장</Button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function chatsReducer(state, action) {
+      switch (action.type) {
+        case 'create':
+          return [action.chat, ...state];
+        case 'delete':
+          return state.filter((c) => c.id !== action.id);
+        case 'addMessage':
+          return state.map((c) => c.id === action.chatId
+            ? { ...c, messages: [...c.messages, action.message], updatedAt: Date.now() }
+            : c);
+        case 'appendDelta':
+          return state.map((c) => c.id === action.chatId
+            ? { ...c, messages: c.messages.map((m) => m.id === action.messageId ? { ...m, content: m.content + action.delta } : m) }
+            : c);
+        case 'removeMessage':
+          return state.map((c) => c.id === action.chatId
+            ? { ...c, messages: c.messages.filter((m) => m.id !== action.messageId) }
+            : c);
+        default:
+          return state;
+      }
+    }
+
+    function App() {
+      const [apiKey, setApiKey] = useState(() => storage.get(STORAGE_KEYS.apiKey, ''));
+      const [settings, setSettings] = useState(() => {
+        const saved = storage.get(STORAGE_KEYS.settings, {});
+        // 예전 기본 프롬프트가 저장돼 있으면 새 기본(집사) 프롬프트로 교체
+        if (saved.systemPrompt === LEGACY_SYSTEM_PROMPT) delete saved.systemPrompt;
+        return { ...DEFAULT_SETTINGS, ...saved };
+      });
+      const [chats, dispatch] = useReducer(chatsReducer, null, () => storage.get(STORAGE_KEYS.chats, []));
+      const [activeId, setActiveId] = useState(() => storage.get(STORAGE_KEYS.chats, [])[0]?.id || null);
+      const [streamingId, setStreamingId] = useState(null);
+      const [error, setError] = useState('');
+      const [settingsOpen, setSettingsOpen] = useState(false);
+      const [sidebarOpen, setSidebarOpen] = useState(false);
+      const abortRef = useRef(null);
+
+      useEffect(() => { storage.set(STORAGE_KEYS.chats, chats); }, [chats]);
+
+      const activeChat = chats.find((c) => c.id === activeId) || null;
+
+      const runCompletion = useCallback(async (chatId, history) => {
+        const assistantId = uid();
+        dispatch({ type: 'addMessage', chatId, message: { id: assistantId, role: 'assistant', content: '' } });
+        setStreamingId(assistantId);
+        setError('');
+        const controller = new AbortController();
+        abortRef.current = controller;
+        let received = false;
+        let fullText = '';
+        try {
+          await streamChat({
+            apiKey,
+            model: settings.model,
+            temperature: settings.temperature,
+            messages: [
+              ...(settings.systemPrompt.trim() ? [{ role: 'system', content: settings.systemPrompt }] : []),
+              ...history.map(({ role, content }) => ({ role, content })),
+            ],
+            signal: controller.signal,
+            onDelta: (delta) => { received = true; fullText += delta; dispatch({ type: 'appendDelta', chatId, messageId: assistantId, delta }); },
+          });
+          // 모델이 하트를 빠뜨려도 답변 끝에 반드시 하얀 하트가 붙도록 보장
+          if (received && !fullText.trimEnd().endsWith(REPLY_SUFFIX)) {
+            dispatch({ type: 'appendDelta', chatId, messageId: assistantId, delta: ` ${REPLY_SUFFIX}` });
+          }
+        } catch (e) {
+          if (e.name !== 'AbortError') {
+            if (!received) dispatch({ type: 'removeMessage', chatId, messageId: assistantId });
+            setError(e.message === 'Failed to fetch' ? '네트워크 오류입니다. 인터넷 연결을 확인해 주세요.' : e.message);
+          } else if (!received) {
+            dispatch({ type: 'removeMessage', chatId, messageId: assistantId });
+          }
+        } finally {
+          setStreamingId(null);
+          abortRef.current = null;
+        }
+      }, [apiKey, settings]);
+
+      const handleSend = (text) => {
+        let chat = activeChat;
+        if (!chat) {
+          chat = { id: uid(), title: text.slice(0, 30), messages: [], createdAt: Date.now() };
+          dispatch({ type: 'create', chat });
+          setActiveId(chat.id);
+        }
+        const userMsg = { id: uid(), role: 'user', content: text };
+        dispatch({ type: 'addMessage', chatId: chat.id, message: userMsg });
+        runCompletion(chat.id, [...chat.messages, userMsg]);
+      };
+
+      const handleRetry = () => {
+        if (!activeChat || streamingId) return;
+        runCompletion(activeChat.id, activeChat.messages);
+      };
+
+      const handleNew = () => {
+        abortRef.current?.abort();
+        setActiveId(null);
+        setError('');
+        setSidebarOpen(false);
+      };
+
+      const handleDelete = (id) => {
+        if (!confirm('이 대화를 삭제할까요?')) return;
+        if (id === activeId) { abortRef.current?.abort(); setActiveId(null); setError(''); }
+        dispatch({ type: 'delete', id });
+      };
+
+      const handleSave = (key, form) => {
+        setApiKey(key);
+        setSettings(form);
+        storage.set(STORAGE_KEYS.apiKey, key);
+        storage.set(STORAGE_KEYS.settings, form);
+      };
+
+      return (
+        <div className="flex h-screen overflow-hidden">
+          <Sidebar
+            chats={chats}
+            activeId={activeId}
+            onSelect={(id) => { if (streamingId) abortRef.current?.abort(); setActiveId(id); setError(''); setSidebarOpen(false); }}
+            onNew={handleNew}
+            onDelete={handleDelete}
+            onOpenSettings={() => { setSettingsOpen(true); setSidebarOpen(false); }}
+            isOpen={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+          />
+          <main className="flex min-w-0 flex-1 flex-col">
+            <ChatHeader title={activeChat?.title || '새 대화'} model={settings.model} onToggleSidebar={() => setSidebarOpen(true)} />
+            <div className="flex-1 overflow-y-auto">
+              {activeChat
+                ? <ChatView chat={activeChat} streamingId={streamingId} error={error} onRetry={handleRetry} />
+                : <WelcomeView hasKey={!!apiKey} onOpenSettings={() => setSettingsOpen(true)} onPick={handleSend} />}
+            </div>
+            <Composer
+              onSend={handleSend}
+              onStop={() => abortRef.current?.abort()}
+              isStreaming={!!streamingId}
+              disabled={!apiKey}
+            />
+          </main>
+          <SettingsModal
+            isOpen={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            apiKey={apiKey}
+            settings={settings}
+            onSave={handleSave}
+          />
+        </div>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
