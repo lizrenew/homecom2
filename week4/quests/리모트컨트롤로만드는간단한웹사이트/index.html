@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>모듈필라테스</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=Noto+Serif+KR:wght@500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f7f5f2;
+      --surface: #ffffff;
+      --text: #2c2a28;
+      --muted: #7d766f;
+      --accent: #6f8a7a;
+      --accent-soft: #e6ede8;
+      --line: #e4dfd8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Noto Sans KR', sans-serif;
+      line-height: 1.75;
+      word-break: keep-all;
+    }
+    h1, h2, h3 { font-family: 'Noto Serif KR', serif; font-weight: 700; }
+    .wrap { max-width: 1000px; margin: 0 auto; padding: 0 20px; }
+
+    header {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(247, 245, 242, 0.92);
+      backdrop-filter: blur(6px);
+      border-bottom: 1px solid var(--line);
+    }
+    header .wrap { display: flex; justify-content: space-between; align-items: center; height: 62px; }
+    .logo { text-decoration: none; color: var(--text); font-family: 'Noto Serif KR', serif; font-weight: 700; font-size: 1.15rem; letter-spacing: 0.02em; }
+    .logo span { color: var(--accent); }
+    nav a { margin-left: 22px; color: var(--text); text-decoration: none; font-size: 0.92rem; }
+    nav a:hover { color: var(--accent); }
+
+    .hero { padding: 110px 0 90px; text-align: center; }
+    .hero .eyebrow { color: var(--accent); letter-spacing: 0.25em; font-size: 0.8rem; font-weight: 500; }
+    .hero h1 { font-size: clamp(2rem, 5.5vw, 3.2rem); margin: 14px 0 16px; line-height: 1.35; }
+    .hero p { color: var(--muted); max-width: 560px; margin: 0 auto; }
+    .hero .chips { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 26px; }
+    .chip { background: var(--accent-soft); color: var(--accent); padding: 4px 14px; border-radius: 999px; font-size: 0.85rem; font-weight: 500; }
+    .btn { display: inline-block; margin-top: 30px; padding: 13px 30px; background: var(--accent); color: #fff; border-radius: 999px; text-decoration: none; font-weight: 500; }
+    .btn:hover { opacity: 0.9; }
+
+    section { padding: 80px 0; border-top: 1px solid var(--line); }
+    .section-title { text-align: center; margin-bottom: 40px; }
+    .section-title p { color: var(--accent); letter-spacing: 0.2em; font-size: 0.78rem; font-weight: 500; }
+    .section-title h2 { font-size: 1.85rem; margin-top: 6px; }
+
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 26px; }
+    .card h3 { font-size: 1.15rem; margin-bottom: 6px; }
+    .card p { color: var(--muted); font-size: 0.93rem; }
+    .card .tag { display: inline-block; font-size: 0.8rem; color: var(--accent); font-weight: 700; margin-bottom: 8px; }
+
+    .about-text { max-width: 640px; margin: 0 auto; text-align: center; color: var(--muted); }
+
+    /* 기구 탭 */
+    .tabs { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
+    .tabs button { border: 1px solid var(--line); background: var(--surface); color: var(--text); padding: 8px 18px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 0.92rem; }
+    .tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .equip { max-width: 640px; margin: 0 auto; text-align: center; }
+    .equip h3 { font-size: 1.3rem; margin-bottom: 8px; }
+    .equip p { color: var(--muted); }
+
+    .amenities { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+    .amenities span { background: var(--surface); border: 1px solid var(--line); padding: 8px 16px; border-radius: 999px; font-size: 0.92rem; }
+
+    .info li { list-style: none; display: flex; gap: 12px; padding: 6px 0; }
+    .info a { color: var(--text); }
+    .info li b { min-width: 64px; color: var(--accent); font-weight: 500; }
+
+    footer { text-align: center; padding: 34px 20px; color: var(--muted); font-size: 0.82rem; border-top: 1px solid var(--line); }
+
+    @media (max-width: 560px) {
+      nav a { margin-left: 12px; font-size: 0.85rem; }
+      .hero { padding: 70px 0 60px; }
+      section { padding: 60px 0; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <a href="#" class="logo">MODULE <span>Pilates</span></a>
+      <nav>
+        <a href="#about">소개</a>
+        <a href="#class">수업</a>
+        <a href="#equip">기구</a>
+        <a href="#info">오시는 길</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero wrap">
+      <p class="eyebrow">CLASSIC &amp; MODERN PILATES</p>
+      <h1>내 몸과 대화하는 시간,<br />모듈필라테스</h1>
+      <p>금호역 3번 출구 바로 앞, 햇살이 잘 드는 클래식 &amp; 모던 통합 필라테스 스튜디오</p>
+      <div class="chips">
+        <span class="chip">1:1 개인레슨</span>
+        <span class="chip">2:1 듀엣레슨</span>
+        <span class="chip">4:1 그룹레슨</span>
+      </div>
+      <a href="#info" class="btn">체험 수업 문의하기</a>
+    </div>
+
+    <section id="about">
+      <div class="wrap">
+        <div class="section-title"><p>ABOUT</p><h2>스튜디오 소개</h2></div>
+        <p class="about-text">
+          모듈필라테스는 클래식과 모던 필라테스를 함께 다루는 통합 스튜디오예요.
+          오전과 낮 시간 동안 따뜻한 햇살이 잘 들어오는 공간에서,
+          원하시는 시간과 운동 효과에 맞춰 강사님을 배정해 드립니다.
+          다이어트와 체형교정을 위한 기구 필라테스를 진행해요.
+        </p>
+      </div>
+    </section>
+
+    <section id="class">
+      <div class="wrap">
+        <div class="section-title"><p>CLASS</p><h2>수업 안내</h2></div>
+        <div class="grid">
+          <div class="card">
+            <span class="tag">1 : 1</span>
+            <h3>개인레슨</h3>
+            <p>개인의 몸 상태에 맞춰 개인실의 대기구로 다양하게 진행하는 맞춤 수업이에요.</p>
+          </div>
+          <div class="card">
+            <span class="tag">2 : 1</span>
+            <h3>듀엣레슨</h3>
+            <p>4대 기구가 2대씩 배치되어 있어 두 분이 함께 수업받을 수 있어요.</p>
+          </div>
+          <div class="card">
+            <span class="tag">4 : 1</span>
+            <h3>그룹레슨</h3>
+            <p>그룹룸에서 타워리포머와 소도구로 진행해요. 타워가 있어 리포머보다 다양한 동작이 가능해요.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="equip">
+      <div class="wrap">
+        <div class="section-title"><p>EQUIPMENT</p><h2>발란스드바디 기구</h2></div>
+        <div class="tabs" id="tabs"></div>
+        <div class="equip card" id="equip-detail"></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="section-title"><p>AMENITIES</p><h2>편의 시설</h2></div>
+        <div class="amenities">
+          <span>1회 체험 가능</span>
+          <span>남·녀 탈의실</span>
+          <span>개인 샤워실</span>
+          <span>주차 가능</span>
+          <span>인바디 측정</span>
+          <span>서울사랑상품권</span>
+          <span>제로페이</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="info">
+      <div class="wrap">
+        <div class="section-title"><p>LOCATION</p><h2>오시는 길</h2></div>
+        <div class="grid">
+          <div class="card info">
+            <h3>주소</h3>
+            <ul>
+              <li><b>도로명</b>서울 성동구 동호로 99, 4층</li>
+              <li><b>지번</b>금호동4가 1483</li>
+              <li><b>교통</b>금호역 3번 출구 바로 앞 (스타벅스 건물 4층)</li>
+            </ul>
+          </div>
+          <div class="card info">
+            <h3>문의</h3>
+            <ul>
+              <li><b>전화</b><a href="tel:0507-1317-9421">0507-1317-9421</a></li>
+              <li><b>인스타</b>@modulepilates</li>
+              <li><b>운영</b>07:00 오픈 · 상세 시간과 수강료는 전화로 문의해 주세요</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    이 페이지는 웹 제작 연습용으로 만든 비공식 페이지입니다.<br />
+    정보 출처: 네이버 검색·플레이스, 모듈필라테스 블로그, 당근 동네업체 (2026.10.14 확인)
+  </footer>
+
+  <script>
+    const EQUIPMENT = {
+      '캐딜락': '“캐딜락에선 좋은 일만 일어난다”는 말이 있을 정도로 좋은 기구예요. 매트나 리포머 메소드를 익힌 뒤 파워하우스의 커넥션을 연결하고, 약한 팔·다리 근력을 강화할 수 있어요.',
+      '래더 배럴': '풋페달로 간편하게 간격을 조절할 수 있어, 그룹레슨에서도 회원님 체형에 맞게 손쉽게 세팅해요.',
+      '타워리포머': '그룹레슨에서 사용하는 기구예요. 타워가 결합되어 있어 리포머보다 다양한 운동이 가능해요.',
+      '코어얼라인': '개인실에 배치된 기구로, 개인레슨에서 몸 상태에 맞춰 활용해요.',
+    };
+
+    const tabsEl = document.getElementById('tabs');
+    const detailEl = document.getElementById('equip-detail');
+
+    function showEquip(name) {
+      tabsEl.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.textContent === name));
+      detailEl.innerHTML = `<h3>${name}</h3><p>${EQUIPMENT[name]}</p>`;
+    }
+
+    Object.keys(EQUIPMENT).forEach((name) => {
+      const btn = document.createElement('button');
+      btn.textContent = name;
+      btn.addEventListener('click', () => showEquip(name));
+      tabsEl.appendChild(btn);
+    });
+    showEquip('캐딜락');
+  </script>
+</body>
+</html>
