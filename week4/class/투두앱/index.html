@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>할 일 목록</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+    const API_BASE_URL = '/api';
+
+    async function api(endpoint, options = {}) {
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.message || '요청에 실패했어요');
+      return json.data;
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-indigo-600 text-white hover:bg-indigo-700',
+        secondary: 'bg-slate-200 text-slate-700 hover:bg-slate-300',
+        danger: 'bg-rose-500 text-white hover:bg-rose-600',
+        ghost: 'text-slate-500 hover:bg-slate-100',
+      };
+      const sizes = { sm: 'px-2.5 py-1 text-sm', md: 'px-4 py-2', lg: 'px-5 py-3 text-lg' };
+      return (
+        <button
+          disabled={disabled}
+          onClick={onClick}
+          className={`rounded-lg font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ type = 'text', label, value, onChange, placeholder, error, disabled, className = '', ...rest }) {
+      return (
+        <div className={`flex-1 ${className}`}>
+          {label && <label className="block text-sm font-medium text-slate-600 mb-1">{label}</label>}
+          <input
+            type={type}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            aria-invalid={!!error}
+            className={`w-full rounded-lg border px-3 py-2 outline-none transition focus:ring-2 focus:ring-indigo-400 ${error ? 'border-rose-400' : 'border-slate-300'}`}
+            {...rest}
+          />
+          {error && <p className="mt-1 text-sm text-rose-500">{error}</p>}
+        </div>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return <div className={`bg-white rounded-2xl shadow-sm p-5 sm:p-6 ${className}`}>{children}</div>;
+    }
+
+    // ========================================
+    // 🧩 Common Components
+    // ========================================
+    function TodoItem({ todo, onToggle, onDelete, onRename }) {
+      const [editing, setEditing] = useState(false);
+      const [draft, setDraft] = useState(todo.title);
+      const inputRef = useRef(null);
+
+      useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+
+      const save = () => {
+        const t = draft.trim();
+        setEditing(false);
+        if (t && t !== todo.title) onRename(todo.id, t);
+        else setDraft(todo.title);
+      };
+
+      return (
+        <li className="group flex items-center gap-3 py-3">
+          <input
+            type="checkbox"
+            checked={todo.done}
+            onChange={() => onToggle(todo)}
+            aria-label={`${todo.title} 완료 표시`}
+            className="h-5 w-5 accent-indigo-600 cursor-pointer"
+          />
+          {editing ? (
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={save}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') save();
+                if (e.key === 'Escape') { setDraft(todo.title); setEditing(false); }
+              }}
+              className="flex-1 rounded border border-indigo-300 px-2 py-1 outline-none focus:ring-2 focus:ring-indigo-400"
+            />
+          ) : (
+            <span
+              onDoubleClick={() => setEditing(true)}
+              title="더블클릭해서 수정"
+              className={`flex-1 break-all cursor-text ${todo.done ? 'line-through text-slate-400' : 'text-slate-800'}`}
+            >
+              {todo.title}
+            </span>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onDelete(todo.id)}
+            aria-label={`${todo.title} 삭제`}
+            className="sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+          >
+            ✕
+          </Button>
+        </li>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    const FILTERS = [
+      { key: 'all', label: '전체' },
+      { key: 'active', label: '진행 중' },
+      { key: 'done', label: '완료' },
+    ];
+
+    function TodoPage() {
+      const [todos, setTodos] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState('');
+      const [title, setTitle] = useState('');
+      const [inputError, setInputError] = useState('');
+      const [adding, setAdding] = useState(false);
+      const [filter, setFilter] = useState('all');
+
+      const load = useCallback(async () => {
+        try {
+          setError('');
+          setTodos(await api('/todos'));
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setLoading(false);
+        }
+      }, []);
+
+      useEffect(() => { load(); }, [load]);
+
+      const handleAdd = async (e) => {
+        e.preventDefault();
+        const t = title.trim();
+        if (!t) return setInputError('할 일을 입력해주세요');
+        setAdding(true);
+        try {
+          const created = await api('/todos', { method: 'POST', body: JSON.stringify({ title: t }) });
+          setTodos((prev) => [created, ...prev]);
+          setTitle('');
+          setInputError('');
+        } catch (e) {
+          setInputError(e.message);
+        } finally {
+          setAdding(false);
+        }
+      };
+
+      // 낙관적 업데이트 후 실패 시 다시 불러오기
+      const handleToggle = async (todo) => {
+        setTodos((prev) => prev.map((t) => (t.id === todo.id ? { ...t, done: !t.done } : t)));
+        try {
+          await api(`/todos/${todo.id}`, { method: 'PATCH', body: JSON.stringify({ done: !todo.done }) });
+        } catch (e) { setError(e.message); load(); }
+      };
+
+      const handleRename = async (id, newTitle) => {
+        setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, title: newTitle } : t)));
+        try {
+          await api(`/todos/${id}`, { method: 'PATCH', body: JSON.stringify({ title: newTitle }) });
+        } catch (e) { setError(e.message); load(); }
+      };
+
+      const handleDelete = async (id) => {
+        setTodos((prev) => prev.filter((t) => t.id !== id));
+        try {
+          await api(`/todos/${id}`, { method: 'DELETE' });
+        } catch (e) { setError(e.message); load(); }
+      };
+
+      const handleClearDone = async () => {
+        setTodos((prev) => prev.filter((t) => !t.done));
+        try {
+          await api('/todos/completed', { method: 'DELETE' });
+        } catch (e) { setError(e.message); load(); }
+      };
+
+      const visible = useMemo(() => {
+        const list = filter === 'active' ? todos.filter((t) => !t.done)
+          : filter === 'done' ? todos.filter((t) => t.done) : todos;
+        return [...list].sort((a, b) => a.done - b.done);
+      }, [todos, filter]);
+
+      const remaining = todos.filter((t) => !t.done).length;
+      const doneCount = todos.length - remaining;
+
+      return (
+        <Card>
+          <form onSubmit={handleAdd} className="flex gap-2 items-start">
+            <Input
+              value={title}
+              onChange={(e) => { setTitle(e.target.value); setInputError(''); }}
+              placeholder="무엇을 해야 하나요?"
+              error={inputError}
+              maxLength={200}
+              aria-label="새 할 일"
+            />
+            <Button type="submit" disabled={adding}>{adding ? '추가 중…' : '추가'}</Button>
+          </form>
+
+          <div role="tablist" className="mt-5 flex gap-1 rounded-lg bg-slate-100 p-1">
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                role="tab"
+                aria-selected={filter === f.key}
+                onClick={() => setFilter(f.key)}
+                className={`flex-1 rounded-md py-1.5 text-sm font-medium transition ${filter === f.key ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {error && (
+            <div role="alert" className="mt-4 flex items-center justify-between rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
+              <span>{error}</span>
+              <Button variant="ghost" size="sm" onClick={() => { setLoading(true); load(); }}>다시 시도</Button>
+            </div>
+          )}
+
+          {loading ? (
+            <div className="flex justify-center py-12" aria-label="불러오는 중">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600" />
+            </div>
+          ) : visible.length === 0 ? (
+            <p className="py-12 text-center text-slate-400">
+              {filter === 'done' ? '아직 완료한 일이 없어요' : filter === 'active' ? '모든 일을 끝냈어요 🎉' : '할 일을 추가해보세요 ✍️'}
+            </p>
+          ) : (
+            <ul className="mt-2 divide-y divide-slate-100">
+              {visible.map((todo) => (
+                <TodoItem key={todo.id} todo={todo} onToggle={handleToggle} onDelete={handleDelete} onRename={handleRename} />
+              ))}
+            </ul>
+          )}
+
+          {todos.length > 0 && (
+            <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-sm text-slate-500">
+              <span>남은 할 일 {remaining}개</span>
+              <Button variant="ghost" size="sm" onClick={handleClearDone} disabled={doneCount === 0}>
+                완료 항목 삭제
+              </Button>
+            </div>
+          )}
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return (
+        <main className="mx-auto max-w-xl px-4 py-10 sm:py-16">
+          <h1 className="mb-6 text-3xl font-bold text-slate-800">📝 할 일 목록</h1>
+          <TodoPage />
+          <p className="mt-4 text-center text-xs text-slate-400">항목을 더블클릭하면 수정할 수 있어요</p>
+        </main>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

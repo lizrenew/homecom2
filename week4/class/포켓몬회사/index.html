@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>포켓몬 컴퍼니</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes float { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-14px) } }
+    .float { animation: float 4s ease-in-out infinite; }
+    html { scroll-behavior: smooth; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState } = React;
+
+    const API_BASE_URL = '/api';
+    const sprite = (id) =>
+      `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`;
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled, className = '', children, ...props }) {
+      const variants = {
+        primary: 'bg-red-500 text-white hover:bg-red-600',
+        secondary: 'bg-white text-slate-800 hover:bg-slate-100 border border-slate-200',
+        ghost: 'text-slate-600 hover:bg-slate-100',
+      };
+      const sizes = { sm: 'px-3 py-1.5 text-sm', md: 'px-5 py-2.5', lg: 'px-7 py-3.5 text-lg' };
+      return (
+        <button
+          disabled={disabled}
+          className={`rounded-full font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...props}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ label, id, error, className = '', ...props }) {
+      return (
+        <div className={className}>
+          <label htmlFor={id} className="block text-sm font-medium mb-1">{label}</label>
+          <input
+            id={id}
+            className={`w-full rounded-lg border px-4 py-2.5 outline-none focus:ring-2 focus:ring-red-300 ${error ? 'border-red-400' : 'border-slate-300'}`}
+            aria-invalid={!!error}
+            {...props}
+          />
+          {error && <p className="text-sm text-red-500 mt-1">{error}</p>}
+        </div>
+      );
+    }
+
+    function Textarea({ label, id, error, className = '', ...props }) {
+      return (
+        <div className={className}>
+          <label htmlFor={id} className="block text-sm font-medium mb-1">{label}</label>
+          <textarea
+            id={id}
+            rows={5}
+            className={`w-full rounded-lg border px-4 py-2.5 outline-none focus:ring-2 focus:ring-red-300 ${error ? 'border-red-400' : 'border-slate-300'}`}
+            aria-invalid={!!error}
+            {...props}
+          />
+          {error && <p className="text-sm text-red-500 mt-1">{error}</p>}
+        </div>
+      );
+    }
+
+    function Select({ label, id, options, className = '', ...props }) {
+      return (
+        <div className={className}>
+          <label htmlFor={id} className="block text-sm font-medium mb-1">{label}</label>
+          <select id={id} className="w-full rounded-lg border border-slate-300 px-4 py-2.5 bg-white outline-none focus:ring-2 focus:ring-red-300" {...props}>
+            {options.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return <div className={`bg-white rounded-2xl shadow-sm border border-slate-100 p-6 ${className}`}>{children}</div>;
+    }
+
+    function SectionTitle({ eyebrow, title, desc }) {
+      return (
+        <div className="text-center mb-12">
+          <p className="text-red-500 font-bold tracking-widest text-sm">{eyebrow}</p>
+          <h2 className="text-3xl md:text-4xl font-extrabold mt-2">{title}</h2>
+          {desc && <p className="text-slate-500 mt-3">{desc}</p>}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 Layout Components
+    // ========================================
+    function Header() {
+      const links = [['#about', '회사소개'], ['#business', '사업분야'], ['#pokemon', '대표 포켓몬'], ['#contact', '문의하기']];
+      return (
+        <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-100">
+          <nav className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+            <a href="#" className="flex items-center gap-2 font-extrabold text-lg">
+              <span className="w-7 h-7 rounded-full border-4 border-slate-800 bg-gradient-to-b from-red-500 from-50% to-white to-50%" aria-hidden="true"></span>
+              포켓몬 컴퍼니
+            </a>
+            <ul className="hidden md:flex gap-6 text-sm font-medium text-slate-600">
+              {links.map(([href, text]) => <li key={href}><a href={href} className="hover:text-red-500">{text}</a></li>)}
+            </ul>
+            <a href="#contact" className="md:hidden text-sm font-semibold text-red-500">문의하기</a>
+          </nav>
+        </header>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="bg-slate-900 text-slate-400 text-sm">
+          <div className="max-w-6xl mx-auto px-4 py-10 flex flex-col md:flex-row justify-between gap-4">
+            <div>
+              <p className="text-white font-bold mb-1">포켓몬 컴퍼니 (수업용 가상 회사)</p>
+              <p>서울특별시 어딘가 태초마을 1번길 · contact@pokemon-company.example</p>
+            </div>
+            <p>© 2026 Pokemon Company Demo. All rights reserved.</p>
+          </div>
+        </footer>
+      );
+    }
+
+    // ========================================
+    // 📄 Section Components
+    // ========================================
+    function Hero() {
+      return (
+        <section className="bg-gradient-to-br from-red-500 via-red-400 to-amber-300 text-white">
+          <div className="max-w-6xl mx-auto px-4 py-20 md:py-28 grid md:grid-cols-2 gap-10 items-center">
+            <div>
+              <p className="font-bold tracking-widest text-red-100">GOTTA CATCH 'EM ALL</p>
+              <h1 className="text-4xl md:text-6xl font-extrabold leading-tight mt-3">
+                사람과 포켓몬이<br />함께하는 세상
+              </h1>
+              <p className="mt-5 text-lg text-red-50">
+                게임, 카드, 애니메이션, 굿즈까지 —<br className="hidden sm:block" />
+                포켓몬 컴퍼니는 전 세계 트레이너의 모험을 만듭니다.
+              </p>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <a href="#business"><Button variant="secondary" size="lg">사업 둘러보기</Button></a>
+                <a href="#contact"><Button size="lg" className="bg-slate-900 hover:bg-slate-800">제휴 문의</Button></a>
+              </div>
+            </div>
+            <div className="flex justify-center">
+              <img src={sprite(25)} alt="피카츄" className="float w-64 md:w-96 drop-shadow-2xl" />
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    function About() {
+      const stats = [['1,025+', '등록 포켓몬'], ['90+', '진출 국가'], ['480억+', '누적 카드 발행'], ['30년', '모험의 역사']];
+      return (
+        <section id="about" className="max-w-6xl mx-auto px-4 py-20">
+          <SectionTitle eyebrow="ABOUT US" title="회사소개" desc="1996년 첫 모험 이후, 우리는 꾸준히 새로운 세계를 열어왔습니다." />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {stats.map(([num, label]) => (
+              <Card key={label} className="text-center">
+                <p className="text-3xl font-extrabold text-red-500">{num}</p>
+                <p className="text-slate-500 mt-1">{label}</p>
+              </Card>
+            ))}
+          </div>
+        </section>
+      );
+    }
+
+    function Business() {
+      const items = [
+        ['🎮', '게임', '메인 시리즈부터 모바일까지, 모든 플랫폼에서 즐기는 포켓몬 게임'],
+        ['🃏', '트레이딩 카드', '전 세계 대회가 열리는 포켓몬 카드 게임 기획·유통'],
+        ['📺', '애니메이션·영화', 'TV 시리즈와 극장판으로 이어지는 트레이너들의 이야기'],
+        ['🧸', '라이선스·굿즈', '인형, 의류, 콜라보 상품 등 생활 속 포켓몬'],
+      ];
+      return (
+        <section id="business" className="bg-white py-20">
+          <div className="max-w-6xl mx-auto px-4">
+            <SectionTitle eyebrow="BUSINESS" title="사업분야" />
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {items.map(([icon, title, desc]) => (
+                <Card key={title} className="hover:-translate-y-1 hover:shadow-md transition">
+                  <div className="text-4xl">{icon}</div>
+                  <h3 className="font-bold text-lg mt-4">{title}</h3>
+                  <p className="text-slate-500 text-sm mt-2">{desc}</p>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    function Featured() {
+      const mons = [
+        [1, '이상해씨', 'bg-green-100'], [4, '파이리', 'bg-orange-100'], [7, '꼬부기', 'bg-sky-100'],
+        [25, '피카츄', 'bg-yellow-100'], [133, '이브이', 'bg-amber-100'], [150, '뮤츠', 'bg-purple-100'],
+      ];
+      return (
+        <section id="pokemon" className="max-w-6xl mx-auto px-4 py-20">
+          <SectionTitle eyebrow="OUR FRIENDS" title="대표 포켓몬" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+            {mons.map(([id, name, bg]) => (
+              <Card key={id} className={`${bg} border-0 text-center p-4`}>
+                <img src={sprite(id)} alt={name} loading="lazy" className="w-full aspect-square object-contain" />
+                <p className="text-xs text-slate-500">No.{String(id).padStart(4, '0')}</p>
+                <p className="font-bold">{name}</p>
+              </Card>
+            ))}
+          </div>
+        </section>
+      );
+    }
+
+    // ========================================
+    // ✉️ Contact Form (POST /api/inquiries → txt 저장)
+    // ========================================
+    const EMPTY = { name: '', email: '', phone: '', category: '제휴 문의', message: '' };
+
+    function validate(f) {
+      const e = {};
+      if (!f.name.trim()) e.name = '이름을 입력해주세요.';
+      if (!/^\S+@\S+\.\S+$/.test(f.email)) e.email = '올바른 이메일을 입력해주세요.';
+      if (f.message.trim().length < 5) e.message = '문의 내용을 5자 이상 입력해주세요.';
+      return e;
+    }
+
+    function ContactForm() {
+      const [form, setForm] = useState(EMPTY);
+      const [errors, setErrors] = useState({});
+      const [status, setStatus] = useState({ type: 'idle', msg: '' });
+
+      const onChange = (key) => (ev) => setForm({ ...form, [key]: ev.target.value });
+
+      async function onSubmit(ev) {
+        ev.preventDefault();
+        const errs = validate(form);
+        setErrors(errs);
+        if (Object.keys(errs).length) return;
+
+        setStatus({ type: 'loading', msg: '' });
+        try {
+          const res = await fetch(`${API_BASE_URL}/inquiries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(form),
+          });
+          const json = await res.json();
+          if (!json.success) throw new Error(json.message);
+          setStatus({ type: 'success', msg: `문의가 접수되었습니다! (접수번호 #${json.data.id})` });
+          setForm(EMPTY);
+        } catch (err) {
+          setStatus({ type: 'error', msg: err.message || '전송에 실패했습니다. 잠시 후 다시 시도해주세요.' });
+        }
+      }
+
+      return (
+        <section id="contact" className="bg-slate-100 py-20">
+          <div className="max-w-3xl mx-auto px-4">
+            <SectionTitle eyebrow="CONTACT" title="문의하기" desc="제휴, 채용, 기타 궁금한 점을 남겨주시면 빠르게 답변드리겠습니다." />
+            <Card className="p-6 md:p-10">
+              <form onSubmit={onSubmit} noValidate className="grid md:grid-cols-2 gap-5">
+                <Input id="name" label="이름 *" value={form.name} onChange={onChange('name')} error={errors.name} placeholder="한지우" />
+                <Input id="email" type="email" label="이메일 *" value={form.email} onChange={onChange('email')} error={errors.email} placeholder="ash@pallet.town" />
+                <Input id="phone" label="연락처" value={form.phone} onChange={onChange('phone')} placeholder="010-0000-0000" />
+                <Select id="category" label="문의 유형" value={form.category} onChange={onChange('category')}
+                  options={['제휴 문의', '채용 문의', '제품 문의', '기타']} />
+                <Textarea id="message" label="문의 내용 *" className="md:col-span-2" value={form.message}
+                  onChange={onChange('message')} error={errors.message} placeholder="문의 내용을 입력해주세요." />
+                <div className="md:col-span-2 flex flex-col sm:flex-row items-center gap-4 justify-between">
+                  <p role="status" aria-live="polite"
+                    className={`text-sm ${status.type === 'success' ? 'text-green-600' : status.type === 'error' ? 'text-red-500' : 'text-slate-400'}`}>
+                    {status.msg || '* 표시는 필수 항목입니다.'}
+                  </p>
+                  <Button type="submit" size="lg" disabled={status.type === 'loading'} className="w-full sm:w-auto">
+                    {status.type === 'loading' ? '전송 중…' : '문의 보내기'}
+                  </Button>
+                </div>
+              </form>
+            </Card>
+          </div>
+        </section>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return (
+        <>
+          <Header />
+          <main>
+            <Hero />
+            <About />
+            <Business />
+            <Featured />
+            <ContactForm />
+          </main>
+          <Footer />
+        </>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

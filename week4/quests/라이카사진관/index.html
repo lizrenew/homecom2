@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>라이카 사진관</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes develop { 0% { opacity: .25 } 50% { opacity: .6 } 100% { opacity: .25 } }
+    .developing { animation: develop 1.8s ease-in-out infinite; }
+    .grain::after {
+      content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .08;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+  </style>
+</head>
+<body class="bg-neutral-950 text-neutral-100 antialiased">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // Nano Banana 호출은 서버(/api/generate)가 대신한다 — API 키는 서버 환경변수에만 있음
+    const API_BASE_URL = '/api';
+
+    // 실제 프롬프트 문구는 서버에 있고, 클라이언트는 id만 보낸다
+    const FILMS = [
+      { id: 'trix', name: 'Kodak Tri-X 400', desc: '거친 그레인의 흑백' },
+      { id: 'mono', name: 'M Monochrom', desc: '부드러운 디지털 흑백' },
+      { id: 'portra', name: 'Kodak Portra 400', desc: '따뜻한 피부톤 컬러' },
+      { id: 'cinestill', name: 'CineStill 800T', desc: '밤거리 · 할레이션' },
+      { id: 'ektachrome', name: 'Ektachrome E100', desc: '선명한 슬라이드 필름' },
+      { id: 'leicacolor', name: 'Leica 디지털 컬러', desc: 'M11 특유의 색감' },
+    ];
+
+    const LENSES = [
+      { id: '35lux', name: 'Summilux 35mm f/1.4' },
+      { id: '50nocti', name: 'Noctilux 50mm f/0.95' },
+      { id: '28cron', name: 'Summicron 28mm f/2' },
+      { id: '90apo', name: 'APO 90mm f/2' },
+    ];
+
+    const RATIOS = ['3:2', '2:3', '1:1', '4:5', '16:9'];
+
+    const EXAMPLES = [
+      '비 오는 저녁 을지로 골목, 우산 쓴 사람이 지나가는 장면',
+      '창가에 앉아 커피를 마시는 노인의 옆모습',
+      '한강 공원에서 자전거 타는 아이, 늦은 오후 역광',
+      '파리 카페 테라스, 신문 읽는 신사',
+      '새벽 수산시장의 상인들, 김이 오르는 풍경',
+    ];
+
+    async function generateImage({ subject, filmId, lensId, aspectRatio, reference }) {
+      const res = await fetch(`${API_BASE_URL}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject, filmId, lensId, aspectRatio,
+          reference: reference ? { mimeType: reference.mimeType, data: reference.data } : undefined,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.message || `생성에 실패했어요 (${res.status})`);
+      return json.data.image;
+    }
+
+    function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const url = reader.result;
+          resolve({ url, mimeType: file.type, data: url.split(',')[1] });
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-red-600 text-white hover:bg-red-500',
+        secondary: 'bg-neutral-800 text-neutral-100 hover:bg-neutral-700',
+        danger: 'bg-rose-700 text-white hover:bg-rose-600',
+        ghost: 'text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800',
+      };
+      const sizes = { sm: 'px-3 py-1.5 text-sm', md: 'px-4 py-2', lg: 'px-6 py-3 text-lg' };
+      return (
+        <button
+          disabled={disabled}
+          onClick={onClick}
+          className={`rounded-md font-medium tracking-wide transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-40 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Textarea({ label, value, onChange, placeholder, className = '', ...rest }) {
+      return (
+        <div className={className}>
+          {label && <label className="mb-1.5 block text-xs uppercase tracking-widest text-neutral-400">{label}</label>}
+          <textarea
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            rows={3}
+            className="w-full resize-none rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-neutral-100 placeholder-neutral-600 outline-none focus:ring-2 focus:ring-red-600"
+            {...rest}
+          />
+        </div>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return <div className={`rounded-xl border border-neutral-800 bg-neutral-900/60 p-5 ${className}`}>{children}</div>;
+    }
+
+    function Chip({ active, onClick, children, className = '' }) {
+      return (
+        <button
+          type="button"
+          aria-pressed={active}
+          onClick={onClick}
+          className={`rounded-md border px-3 py-2 text-left text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${active ? 'border-red-600 bg-red-600/10 text-white' : 'border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-neutral-200'} ${className}`}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, size = 'md', children }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [isOpen, onClose]);
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-md', md: 'max-w-xl', xl: 'max-w-5xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={title}
+            onClick={(e) => e.stopPropagation()}
+            className={`w-full ${sizes[size]} max-h-[92vh] overflow-auto rounded-xl border border-neutral-800 bg-neutral-950 p-5`}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">{title}</h2>
+              <Button variant="ghost" size="sm" onClick={onClose} aria-label="닫기">✕</Button>
+            </div>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Header() {
+      return (
+        <header className="border-b border-neutral-900">
+          <div className="mx-auto flex max-w-6xl items-center px-4 py-4">
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold italic tracking-tight text-white shadow-lg shadow-red-900/40">Leica</span>
+              <div>
+                <h1 className="font-semibold tracking-wide">라이카 사진관</h1>
+                <p className="text-xs text-neutral-500">Nano Banana로 그리는 레인지파인더 감성</p>
+              </div>
+            </div>
+          </div>
+        </header>
+      );
+    }
+
+    function ReferenceUpload({ reference, onChange }) {
+      const inputRef = useRef(null);
+      const [error, setError] = useState('');
+
+      const handleFile = async (file) => {
+        if (!file) return;
+        if (!file.type.startsWith('image/')) return setError('이미지 파일만 올릴 수 있어요');
+        // 서버리스 요청 본문 상한(4.5MB) 안에 base64가 들어가도록 3MB로 제한
+        if (file.size > 3 * 1024 * 1024) return setError('3MB 이하 사진을 올려주세요');
+        setError('');
+        onChange(await readFileAsBase64(file));
+      };
+
+      return (
+        <div>
+          <label className="mb-1.5 block text-xs uppercase tracking-widest text-neutral-400">내 사진 변환 (선택)</label>
+          {reference ? (
+            <div className="relative overflow-hidden rounded-md border border-neutral-700">
+              <img src={reference.url} alt="참고 사진" className="max-h-40 w-full object-cover" />
+              <button
+                onClick={() => onChange(null)}
+                className="absolute right-2 top-2 rounded bg-black/70 px-2 py-1 text-xs hover:bg-black"
+                aria-label="참고 사진 제거"
+              >
+                제거
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}
+              className="w-full rounded-md border border-dashed border-neutral-700 px-3 py-5 text-sm text-neutral-500 transition hover:border-neutral-500 hover:text-neutral-300"
+            >
+              사진을 끌어놓거나 클릭해서 업로드<br />
+              <span className="text-xs">→ 라이카로 찍은 느낌으로 바꿔드려요</span>
+            </button>
+          )}
+          <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { handleFile(e.target.files[0]); e.target.value = ''; }} />
+          {error && <p className="mt-1 text-sm text-rose-400">{error}</p>}
+        </div>
+      );
+    }
+
+    function PhotoFrame({ photo, onOpen }) {
+      const ratio = photo.aspectRatio.replace(':', '/');
+      return (
+        <figure className="group">
+          <div className="grain relative overflow-hidden rounded-sm bg-neutral-900" style={{ aspectRatio: ratio }}>
+            {photo.status === 'loading' && (
+              <div className="developing absolute inset-0 flex items-center justify-center bg-gradient-to-br from-red-950/40 to-neutral-900">
+                <span className="text-sm text-neutral-300">현상 중…</span>
+              </div>
+            )}
+            {photo.status === 'error' && (
+              <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-rose-400">{photo.error}</div>
+            )}
+            {photo.status === 'done' && (
+              <button onClick={() => onOpen(photo)} className="block h-full w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500" aria-label="크게 보기">
+                <img src={photo.url} alt={photo.subject || '생성된 사진'} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.02]" />
+              </button>
+            )}
+          </div>
+          <figcaption className="mt-2 flex items-center justify-between gap-2 font-mono text-[11px] uppercase tracking-wider text-neutral-500">
+            <span className="truncate">{photo.lens.name}</span>
+            <span className="shrink-0">{photo.film.name}</span>
+          </figcaption>
+        </figure>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function StudioPage() {
+      const [subject, setSubject] = useState('');
+      const [film, setFilm] = useState(FILMS[0]);
+      const [lens, setLens] = useState(LENSES[0]);
+      const [ratio, setRatio] = useState('3:2');
+      const [count, setCount] = useState(1);
+      const [reference, setReference] = useState(null);
+      const [photos, setPhotos] = useState([]);
+      const [viewing, setViewing] = useState(null);
+      const [formError, setFormError] = useState('');
+
+      const busy = photos.some((p) => p.status === 'loading');
+
+      const handleGenerate = useCallback(async () => {
+        if (!subject.trim() && !reference) return setFormError('장면을 묘사하거나 사진을 올려주세요');
+        setFormError('');
+        const batch = Array.from({ length: count }, (_, i) => ({
+          id: `${Date.now()}-${i}`, status: 'loading', subject: subject.trim(), film, lens, aspectRatio: ratio,
+        }));
+        setPhotos((prev) => [...batch, ...prev]);
+        await Promise.all(batch.map(async (item) => {
+          try {
+            const url = await generateImage({ subject: subject.trim(), filmId: film.id, lensId: lens.id, aspectRatio: ratio, reference });
+            setPhotos((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'done', url } : p)));
+          } catch (e) {
+            setPhotos((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'error', error: e.message } : p)));
+          }
+        }));
+      }, [subject, film, lens, ratio, count, reference]);
+
+      const download = (photo) => {
+        const a = document.createElement('a');
+        a.href = photo.url;
+        a.download = `leica-${photo.film.id}-${photo.id}.png`;
+        a.click();
+      };
+
+      return (
+        <div className="mx-auto grid max-w-6xl gap-6 px-4 py-8 lg:grid-cols-[380px_1fr]">
+          {/* ── 컨트롤 패널 ── */}
+          <Card className="h-fit space-y-5 lg:sticky lg:top-6">
+            <Textarea
+              label="장면 묘사"
+              value={subject}
+              onChange={(e) => { setSubject(e.target.value); setFormError(''); }}
+              placeholder="예: 비 오는 저녁 을지로 골목, 우산 쓴 사람"
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleGenerate(); }}
+            />
+            <div className="-mt-3 flex flex-wrap gap-1.5">
+              {EXAMPLES.map((ex) => (
+                <button key={ex} onClick={() => setSubject(ex)} className="rounded-full border border-neutral-800 px-2.5 py-1 text-xs text-neutral-500 hover:border-neutral-600 hover:text-neutral-300">
+                  {ex.length > 14 ? ex.slice(0, 14) + '…' : ex}
+                </button>
+              ))}
+            </div>
+
+            <ReferenceUpload reference={reference} onChange={setReference} />
+
+            <div>
+              <p className="mb-1.5 text-xs uppercase tracking-widest text-neutral-400">필름 / 룩</p>
+              <div className="grid grid-cols-2 gap-2">
+                {FILMS.map((f) => (
+                  <Chip key={f.id} active={film.id === f.id} onClick={() => setFilm(f)}>
+                    <span className="block font-medium">{f.name}</span>
+                    <span className="block text-xs opacity-70">{f.desc}</span>
+                  </Chip>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-xs uppercase tracking-widest text-neutral-400">렌즈</p>
+              <div className="grid grid-cols-2 gap-2">
+                {LENSES.map((l) => (
+                  <Chip key={l.id} active={lens.id === l.id} onClick={() => setLens(l)} className="text-xs">{l.name}</Chip>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <p className="mb-1.5 text-xs uppercase tracking-widest text-neutral-400">비율</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {RATIOS.map((r) => (
+                    <Chip key={r} active={ratio === r} onClick={() => setRatio(r)} className="px-2 py-1 font-mono text-xs">{r}</Chip>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="mb-1.5 text-xs uppercase tracking-widest text-neutral-400">장수</p>
+                <div className="flex gap-1.5">
+                  {[1, 2, 4].map((n) => (
+                    <Chip key={n} active={count === n} onClick={() => setCount(n)} className="px-2.5 py-1 font-mono text-xs">{n}</Chip>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {formError && <p role="alert" className="text-sm text-rose-400">{formError}</p>}
+
+            <Button size="lg" className="w-full" onClick={handleGenerate} disabled={busy}>
+              {busy ? '현상 중…' : '셔터 누르기'}
+            </Button>          </Card>
+
+          {/* ── 갤러리 ── */}
+          <section aria-label="생성된 사진" aria-live="polite">
+            {photos.length === 0 ? (
+              <div className="flex h-full min-h-[50vh] flex-col items-center justify-center rounded-xl border border-dashed border-neutral-800 text-center text-neutral-500">
+                <span className="mb-3 text-5xl">📷</span>
+                <p>아직 찍은 사진이 없어요</p>
+                <p className="mt-1 text-sm">장면을 묘사하고 셔터를 눌러보세요</p>
+              </div>
+            ) : (
+              <div className="grid gap-6 sm:grid-cols-2">
+                {photos.map((p) => <PhotoFrame key={p.id} photo={p} onOpen={setViewing} />)}
+              </div>
+            )}
+          </section>
+
+          <Modal isOpen={!!viewing} onClose={() => setViewing(null)} title={viewing?.subject || '내 사진 변환'} size="xl">
+            {viewing && (
+              <div>
+                <img src={viewing.url} alt={viewing.subject || '생성된 사진'} className="mx-auto max-h-[70vh] rounded-sm" />
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="font-mono text-xs uppercase tracking-wider text-neutral-400">
+                    {viewing.lens.name} · {viewing.film.name} · {viewing.aspectRatio}
+                  </p>
+                  <Button size="sm" onClick={() => download(viewing)}>⬇ 다운로드</Button>
+                </div>
+              </div>
+            )}
+          </Modal>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return (
+        <div className="min-h-screen">
+          <Header />
+          <main>
+            <StudioPage />
+          </main>
+        </div>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

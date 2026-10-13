@@ -1,0 +1,5 @@
+node_modules/
+.env
+
+# 문의 접수 내역 (개인정보)
+inquiries.txt
