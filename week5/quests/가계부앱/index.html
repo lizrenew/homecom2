@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>나만의 가계부</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>">
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN은 버전 고정. Babel 은 7.x 고정 (8.x 는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Noto Sans KR', sans-serif; }
+    .font-hand { font-family: 'Gowun Dodum', sans-serif; }
+    .tabular { font-variant-numeric: tabular-nums; }
+    @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+    .animate-pop { animation: pop .18s ease-out; }
+    @keyframes toast { 0% { opacity: 0; transform: translate(-50%, 12px); } 10%, 85% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; } }
+    .animate-toast { animation: toast 2.4s ease-out forwards; }
+  </style>
+</head>
+<body class="bg-stone-100 text-stone-800">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useMemo, useContext, createContext, useCallback } = React;
+
+    // ========================================
+    // 📦 Constants & API
+    // ========================================
+    // category 는 DB 에 한글 이름 그대로 저장된다 (server.js 의 CATEGORIES 와 같은 값)
+    const CATEGORIES = {
+      expense: [
+        { id: '식비', emoji: '🍚', color: '#f97316' },
+        { id: '교통', emoji: '🚇', color: '#0ea5e9' },
+        { id: '주거', emoji: '🏠', color: '#8b5cf6' },
+        { id: '구독료', emoji: '📺', color: '#ec4899' },
+        { id: '경조사', emoji: '💐', color: '#eab308' },
+        { id: '쇼핑', emoji: '🛍️', color: '#14b8a6' },
+        { id: '의료/건강', emoji: '💊', color: '#ef4444' },
+        { id: '기타', emoji: '📦', color: '#78716c' },
+      ],
+      income: [
+        { id: '월급', emoji: '💼', color: '#16a34a' },
+        { id: '부수입', emoji: '✨', color: '#22c55e' },
+        { id: '용돈', emoji: '🎁', color: '#4ade80' },
+        { id: '이자', emoji: '🏦', color: '#86efac' },
+      ],
+    };
+    Object.values(CATEGORIES).flat().forEach(c => { c.name = c.id; });
+    const ALL_CATEGORIES = [...CATEGORIES.expense, ...CATEGORIES.income];
+    const findCategory = (id) => ALL_CATEGORIES.find(c => c.id === id) || CATEGORIES.expense[7];
+
+    const API_BASE_URL = '/api';
+
+    async function api(endpoint, options = {}) {
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        ...options,
+        headers: { 'Content-Type': 'application/json' },
+        body: options.body ? JSON.stringify(options.body) : undefined,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.message || `요청 실패 (${res.status})`);
+      return json.data;
+    }
+
+    const won = (n) => Math.round(n).toLocaleString('ko-KR') + '원';
+    const manwon = (n) => n >= 10000 ? `${Math.round(n / 10000).toLocaleString('ko-KR')}만` : n.toLocaleString('ko-KR');
+    const localISO = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const today = () => localISO();
+    const formatDate = (d) => {
+      const date = new Date(d + 'T00:00:00');
+      return `${date.getMonth() + 1}월 ${date.getDate()}일 (${'일월화수목금토'[date.getDay()]})`;
+    };
+
+    // ========================================
+    // 🗄️ Ledger Store (Context) — 데이터는 전부 서버(Supabase)에서 가져온다
+    // ========================================
+    const LedgerContext = createContext(null);
+
+    function LedgerProvider({ children }) {
+      const [month, setMonth] = useState(today().slice(0, 7));
+      const [monthly, setMonthly] = useState([]);
+      const [summary, setSummary] = useState({ income: 0, expense: 0, incomeCount: 0, expenseCount: 0, byCategory: [] });
+      const [trend, setTrend] = useState([]);
+      const [budgets, setBudgets] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [formOpen, setFormOpen] = useState(false);
+      const [toast, setToast] = useState(null);
+
+      const notify = (msg) => setToast({ msg, key: Date.now() });
+      useEffect(() => {
+        if (!toast) return;
+        const t = setTimeout(() => setToast(null), 2400);
+        return () => clearTimeout(t);
+      }, [toast]);
+
+      const reload = useCallback(async () => {
+        setError(null);
+        try {
+          const [list, sum, tr, bud] = await Promise.all([
+            api(`/transactions?month=${month}`),
+            api(`/summary?month=${month}`),
+            api(`/monthly?month=${month}&months=4`),
+            api(`/budgets?month=${month}`),
+          ]);
+          setMonthly(list); setSummary(sum); setTrend(tr); setBudgets(bud);
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setLoading(false);
+        }
+      }, [month]);
+
+      useEffect(() => { setLoading(true); reload(); }, [reload]);
+
+      const value = {
+        monthly, summary, trend, budgets, loading, error, reload,
+        month, setMonth, formOpen, setFormOpen, toast,
+        addTransaction: async (t) => {
+          await api('/transactions', { method: 'POST', body: t });
+          notify('내역을 저장했어요');
+          if (t.date.slice(0, 7) !== month) setMonth(t.date.slice(0, 7)); else await reload();
+        },
+        removeTransaction: async (id) => {
+          if (!confirm('이 내역을 삭제할까요?')) return;
+          try { await api(`/transactions/${id}`, { method: 'DELETE' }); notify('내역을 삭제했어요'); await reload(); }
+          catch (e) { notify(`삭제 실패: ${e.message}`); }
+        },
+        updateBudget: async (category, amount) => {
+          await api(`/budgets/${encodeURIComponent(category)}`, { method: 'PUT', body: { amount } });
+          notify(`${category} 예산을 저장했어요`);
+          await reload();
+        },
+      };
+      return <LedgerContext.Provider value={value}>{children}</LedgerContext.Provider>;
+    }
+
+    const useLedger = () => useContext(LedgerContext);
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, className = '', children, type = 'button', ...rest }) {
+      const variants = {
+        primary: 'bg-stone-900 text-white hover:bg-stone-700',
+        secondary: 'bg-white text-stone-800 border border-stone-300 hover:bg-stone-50',
+        danger: 'bg-red-500 text-white hover:bg-red-600',
+        ghost: 'text-stone-600 hover:bg-stone-200/60',
+      };
+      const sizes = { sm: 'px-2.5 py-1 text-xs', md: 'px-4 py-2 text-sm', lg: 'px-5 py-3 text-base' };
+      return (
+        <button type={type} disabled={disabled} onClick={onClick}
+          className={`inline-flex items-center justify-center gap-1.5 rounded-xl font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 disabled:opacity-40 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`} {...rest}>
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ label, error, className = '', id, ...rest }) {
+      return (
+        <label className={`block ${className}`} htmlFor={id}>
+          {label && <span className="block text-sm font-medium text-stone-600 mb-1">{label}</span>}
+          <input id={id} className={`w-full rounded-xl border px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-stone-400 ${error ? 'border-red-400' : 'border-stone-300'}`}
+            aria-invalid={!!error} {...rest} />
+          {error && <span className="block text-xs text-red-500 mt-1">{error}</span>}
+        </label>
+      );
+    }
+
+    function Select({ label, options, className = '', id, ...rest }) {
+      return (
+        <label className={`block ${className}`} htmlFor={id}>
+          {label && <span className="block text-sm font-medium text-stone-600 mb-1">{label}</span>}
+          <select id={id} className="w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-stone-400" {...rest}>
+            {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      // className 에 배경색을 주면 기본 bg-white 를 빼서 덮어쓸 수 있게 한다
+      const base = /\bbg-/.test(className) ? '' : 'bg-white border-stone-200';
+      return <section className={`${base} rounded-2xl border shadow-sm p-5 ${className}`}>{children}</section>;
+    }
+
+    function Badge({ color, children }) {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+          style={{ backgroundColor: color + '1f', color }}>{children}</span>
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, children, size = 'md' }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [isOpen, onClose]);
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-2xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={onClose}>
+          <div role="dialog" aria-modal="true" aria-label={title} onClick={e => e.stopPropagation()}
+            className={`animate-pop w-full ${sizes[size]} bg-white rounded-t-3xl sm:rounded-3xl shadow-xl p-6 max-h-[92vh] overflow-y-auto`}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-bold">{title}</h2>
+              <button onClick={onClose} aria-label="닫기" className="w-8 h-8 rounded-full hover:bg-stone-100 text-stone-500">✕</button>
+            </div>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    function SegmentedControl({ value, onChange, options, className = '' }) {
+      return (
+        <div role="tablist" className={`inline-flex rounded-xl bg-stone-100 p-1 ${className}`}>
+          {options.map(o => (
+            <button key={o.value} role="tab" aria-selected={value === o.value} onClick={() => onChange(o.value)}
+              className={`px-3 py-1.5 text-sm rounded-lg font-medium transition ${value === o.value ? 'bg-white shadow-sm ' + (o.activeClass || 'text-stone-900') : 'text-stone-500 hover:text-stone-800'}`}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function ProgressBar({ value, max, color, label }) {
+      const pct = max ? Math.min((value / max) * 100, 100) : (value ? 100 : 0);
+      return (
+        <div className="h-2 rounded-full bg-stone-100 overflow-hidden" role="progressbar" aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={Math.round(max)} aria-label={label}>
+          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: color }}></div>
+        </div>
+      );
+    }
+
+    function EmptyState({ emoji = '🫙', title, description }) {
+      return (
+        <div className="text-center py-12 text-stone-500">
+          <div className="text-4xl mb-2">{emoji}</div>
+          <p className="font-medium text-stone-700">{title}</p>
+          {description && <p className="text-sm mt-1">{description}</p>}
+        </div>
+      );
+    }
+
+    function Skeleton({ rows = 4 }) {
+      return <div className="space-y-3 animate-pulse" aria-label="불러오는 중">{[...Array(rows)].map((_, i) => <div key={i} className="h-12 bg-stone-100 rounded-xl"></div>)}</div>;
+    }
+
+    // ========================================
+    // 🔀 Router Components (Hash-based)
+    // ========================================
+    const RouterContext = createContext({ path: '/' });
+
+    function Router({ children }) {
+      const getPath = () => window.location.hash.replace(/^#/, '') || '/';
+      const [path, setPath] = useState(getPath);
+      useEffect(() => {
+        const onChange = () => { setPath(getPath()); window.scrollTo(0, 0); };
+        window.addEventListener('hashchange', onChange);
+        return () => window.removeEventListener('hashchange', onChange);
+      }, []);
+      return <RouterContext.Provider value={{ path }}>{children}</RouterContext.Provider>;
+    }
+
+    const useRouter = () => useContext(RouterContext);
+
+    function Routes({ routes }) {
+      const { path } = useRouter();
+      const match = routes.find(r => r.path === path);
+      return match ? match.element : routes.find(r => r.path === '*').element;
+    }
+
+    function Link({ to, className = '', children, ...rest }) {
+      return <a href={`#${to}`} className={className} {...rest}>{children}</a>;
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    const NAV = [
+      { to: '/', label: '홈', icon: '🏠' },
+      { to: '/list', label: '내역', icon: '📒' },
+      { to: '/categories', label: '카테고리', icon: '📊' },
+      { to: '/budget', label: '예산', icon: '🎯' },
+    ];
+
+    function MonthPicker() {
+      const { month, setMonth } = useLedger();
+      const shift = (d) => {
+        const [y, m] = month.split('-').map(Number);
+        const date = new Date(y, m - 1 + d, 1);
+        setMonth(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`);
+      };
+      const [y, m] = month.split('-');
+      return (
+        <div className="flex items-center gap-1">
+          <button onClick={() => shift(-1)} aria-label="이전 달" className="w-8 h-8 rounded-full hover:bg-stone-200 text-stone-600">‹</button>
+          <span className="font-bold tabular min-w-[96px] text-center">{y}년 {Number(m)}월</span>
+          <button onClick={() => shift(1)} aria-label="다음 달" className="w-8 h-8 rounded-full hover:bg-stone-200 text-stone-600">›</button>
+        </div>
+      );
+    }
+
+    function Header() {
+      const { path } = useRouter();
+      const { setFormOpen } = useLedger();
+      return (
+        <header className="sticky top-0 z-30 bg-stone-100/90 backdrop-blur border-b border-stone-200">
+          <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
+            <Link to="/" className="flex items-center gap-2 shrink-0">
+              <span className="w-9 h-9 rounded-xl bg-stone-900 text-white grid place-items-center text-lg">₩</span>
+              <span className="font-hand text-xl hidden sm:inline">나만의 가계부</span>
+            </Link>
+            <nav className="hidden md:flex items-center gap-1" aria-label="주 메뉴">
+              {NAV.map(n => (
+                <Link key={n.to} to={n.to} aria-current={path === n.to ? 'page' : undefined}
+                  className={`px-3 py-2 rounded-xl text-sm font-medium transition ${path === n.to ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500 hover:text-stone-900'}`}>
+                  {n.label}
+                </Link>
+              ))}
+            </nav>
+            <div className="flex items-center gap-2">
+              <MonthPicker />
+              <Button onClick={() => setFormOpen(true)} className="hidden sm:inline-flex">＋ 내역 등록</Button>
+            </div>
+          </div>
+        </header>
+      );
+    }
+
+    function BottomNav() {
+      const { path } = useRouter();
+      const { setFormOpen } = useLedger();
+      return (
+        <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-stone-200 grid grid-cols-5 h-16" aria-label="하단 메뉴">
+          {NAV.slice(0, 2).map(n => <BottomNavLink key={n.to} n={n} active={path === n.to} />)}
+          <button onClick={() => setFormOpen(true)} className="flex flex-col items-center justify-center text-xs text-stone-900 font-bold">
+            <span className="w-8 h-8 rounded-full bg-stone-900 text-white grid place-items-center text-lg leading-none">＋</span>등록
+          </button>
+          {NAV.slice(2).map(n => <BottomNavLink key={n.to} n={n} active={path === n.to} />)}
+        </nav>
+      );
+    }
+
+    function BottomNavLink({ n, active }) {
+      return (
+        <Link to={n.to} aria-current={active ? 'page' : undefined}
+          className={`flex flex-col items-center justify-center text-xs ${active ? 'text-stone-900 font-bold' : 'text-stone-400'}`}>
+          <span className="text-lg">{n.icon}</span>{n.label}
+        </Link>
+      );
+    }
+
+    function DbStatusBanner() {
+      const { error, reload } = useLedger();
+      if (!error) return null;
+      return (
+        <div className="max-w-5xl mx-auto px-4 pt-4">
+          <div role="alert" className="flex items-center gap-2 text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+            <span className="w-2 h-2 rounded-full bg-red-500 shrink-0"></span>
+            <span className="flex-1">DB 에서 데이터를 불러오지 못했어요 — {error}</span>
+            <Button size="sm" variant="secondary" onClick={reload}>다시 시도</Button>
+          </div>
+        </div>
+      );
+    }
+
+    function TransactionRow({ t, onRemove }) {
+      const c = findCategory(t.category);
+      const isIncome = t.type === 'income';
+      return (
+        <li className="group flex items-center gap-3 py-3">
+          <span className="w-10 h-10 rounded-xl grid place-items-center text-lg shrink-0" style={{ backgroundColor: c.color + '1f' }}>{c.emoji}</span>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium truncate">{t.memo || c.name}</p>
+            <p className="text-xs text-stone-500">{c.name} · {formatDate(t.date)}</p>
+          </div>
+          <span className={`tabular font-bold whitespace-nowrap ${isIncome ? 'text-emerald-600' : 'text-stone-900'}`}>
+            {isIncome ? '+' : '-'}{won(t.amount)}
+          </span>
+          {onRemove && (
+            <button onClick={() => onRemove(t.id)} aria-label={`${t.memo || c.name} 삭제`}
+              className="w-7 h-7 rounded-full text-stone-400 hover:text-red-500 hover:bg-red-50 sm:opacity-0 group-hover:opacity-100 focus:opacity-100 transition">✕</button>
+          )}
+        </li>
+      );
+    }
+
+    function DonutChart({ data, total, size = 180, label = '총 지출' }) {
+      const r = 70, stroke = 26, circ = 2 * Math.PI * r;
+      let offset = 0;
+      return (
+        <svg viewBox="0 0 180 180" width={size} height={size} role="img" aria-label="카테고리별 비율 도넛 차트">
+          <circle cx="90" cy="90" r={r} fill="none" stroke="#f5f5f4" strokeWidth={stroke} />
+          {data.map(d => {
+            const len = total ? (d.total / total) * circ : 0;
+            const el = (
+              <circle key={d.id} cx="90" cy="90" r={r} fill="none" stroke={d.color} strokeWidth={stroke}
+                strokeDasharray={`${Math.max(len - 2, 0)} ${circ}`} strokeDashoffset={-offset} transform="rotate(-90 90 90)">
+                <title>{d.name} {won(d.total)}</title>
+              </circle>
+            );
+            offset += len;
+            return el;
+          })}
+          <text x="90" y="84" textAnchor="middle" className="fill-stone-400" fontSize="11">{label}</text>
+          <text x="90" y="104" textAnchor="middle" className="fill-stone-900 tabular" fontSize="16" fontWeight="700">{(total / 10000).toFixed(1)}만원</text>
+        </svg>
+      );
+    }
+
+    // 월별 수입·지출 막대 차트 (서버 /api/monthly 의 GROUP BY 월 결과)
+    function MonthlyChart({ data, activeMonth }) {
+      const W = 520, H = 200, padL = 40, padB = 26, padT = 12;
+      const max = Math.max(...data.flatMap(d => [d.income, d.expense]), 1);
+      const step = (W - padL) / Math.max(data.length, 1);
+      const bw = Math.min(18, step / 3);
+      const y = (v) => H - padB - (v / max) * (H - padB - padT);
+      const ticks = [0, 0.5, 1].map(f => max * f);
+      return (
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="최근 4개월 수입·지출 막대 차트">
+          {ticks.map(t => (
+            <g key={t}>
+              <line x1={padL} x2={W} y1={y(t)} y2={y(t)} stroke="#e7e5e4" strokeDasharray={t ? '3 3' : ''} />
+              <text x={padL - 6} y={y(t) + 4} textAnchor="end" fontSize="10" className="fill-stone-400 tabular">{manwon(t)}</text>
+            </g>
+          ))}
+          {data.map((d, i) => {
+            const cx = padL + step * i + step / 2;
+            const active = d.month === activeMonth;
+            return (
+              <g key={d.month} opacity={active ? 1 : 0.55}>
+                <rect x={cx - bw - 1} y={y(d.income)} width={bw} height={H - padB - y(d.income)} rx="3" fill="#16a34a"><title>{d.month} 수입 {won(d.income)}</title></rect>
+                <rect x={cx + 1} y={y(d.expense)} width={bw} height={H - padB - y(d.expense)} rx="3" fill="#1c1917"><title>{d.month} 지출 {won(d.expense)}</title></rect>
+                <text x={cx} y={H - 8} textAnchor="middle" fontSize="11" className={active ? 'fill-stone-900 font-bold' : 'fill-stone-500'}>{Number(d.month.slice(5))}월</text>
+              </g>
+            );
+          })}
+        </svg>
+      );
+    }
+
+    function TransactionForm({ onDone }) {
+      const { addTransaction } = useLedger();
+      const [type, setType] = useState('expense');
+      const [form, setForm] = useState({ date: today(), amount: '', category: CATEGORIES.expense[0].id, memo: '' });
+      const [errors, setErrors] = useState({});
+      const [saving, setSaving] = useState(false);
+
+      const changeType = (t) => { setType(t); setForm(f => ({ ...f, category: CATEGORIES[t][0].id })); };
+      const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+      const submit = async (e) => {
+        e.preventDefault();
+        const amount = Number(form.amount);
+        const next = {};
+        if (!form.date) next.date = '날짜를 선택해 주세요';
+        if (!amount || amount <= 0) next.amount = '0보다 큰 금액을 입력해 주세요';
+        setErrors(next);
+        if (Object.keys(next).length) return;
+        setSaving(true);
+        try {
+          await addTransaction({ type, ...form, amount });
+          onDone();
+        } catch (err) {
+          setErrors({ submit: err.message });
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      return (
+        <form onSubmit={submit} className="space-y-4" noValidate>
+          <SegmentedControl value={type} onChange={changeType} className="w-full grid grid-cols-2"
+            options={[{ value: 'expense', label: '지출', activeClass: 'text-red-500' }, { value: 'income', label: '수입', activeClass: 'text-emerald-600' }]} />
+          <Input id="amount" label="금액 (원)" inputMode="numeric" placeholder="예) 12,000" error={errors.amount}
+            value={form.amount ? Number(form.amount).toLocaleString('ko-KR') : ''}
+            onChange={e => setForm(f => ({ ...f, amount: e.target.value.replace(/[^0-9]/g, '').slice(0, 10) }))} />
+          <div>
+            <span className="block text-sm font-medium text-stone-600 mb-2">카테고리</span>
+            <div className="grid grid-cols-4 gap-2">
+              {CATEGORIES[type].map(c => (
+                <button type="button" key={c.id} onClick={() => setForm(f => ({ ...f, category: c.id }))} aria-pressed={form.category === c.id}
+                  className={`rounded-xl border py-2 text-xs flex flex-col items-center gap-0.5 transition ${form.category === c.id ? 'border-stone-900 bg-stone-900 text-white' : 'border-stone-200 hover:bg-stone-50'}`}>
+                  <span className="text-lg">{c.emoji}</span>{c.name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Input id="date" type="date" label="날짜" value={form.date} onChange={set('date')} error={errors.date} />
+          <Input id="memo" label="메모" placeholder="예) 점심 김치찌개" value={form.memo} onChange={set('memo')} maxLength={40} />
+          {errors.submit && <p role="alert" className="text-sm text-red-500">{errors.submit}</p>}
+          <Button type="submit" size="lg" className="w-full" disabled={saving}>{saving ? '저장 중…' : '등록하기'}</Button>
+        </form>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    // 카테고리별 합계는 서버의 GROUP BY 결과(summary.byCategory)를 그대로 쓴다
+    function useCategoryTotals(type) {
+      const { summary } = useLedger();
+      return useMemo(() => CATEGORIES[type]
+        .map(c => {
+          const row = summary.byCategory.find(r => r.type === type && r.category === c.id);
+          return { ...c, total: row ? row.total : 0, count: row ? row.count : 0 };
+        })
+        .sort((a, b) => b.total - a.total), [summary, type]);
+    }
+
+    function SummaryCards() {
+      const { summary, budgets } = useLedger();
+      const { income, expense } = summary;
+      const balance = income - expense;
+      const budgetTotal = budgets.reduce((s, b) => s + b.budget, 0);
+      return (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Card className="col-span-2 lg:col-span-1 bg-stone-900 text-white border-stone-900">
+            <p className="text-sm text-stone-400">이번 달 남은 돈</p>
+            <p className={`text-3xl font-black tabular mt-1 ${balance < 0 ? 'text-red-300' : ''}`}>{won(balance)}</p>
+            <p className="text-xs text-stone-400 mt-2">수입 대비 {income ? Math.round((expense / income) * 100) : 0}% 사용</p>
+          </Card>
+          <Card>
+            <p className="text-sm text-stone-500">수입</p>
+            <p className="text-xl sm:text-2xl font-bold tabular mt-1 text-emerald-600">+{won(income)}</p>
+            <p className="text-xs text-stone-400 mt-2">{summary.incomeCount}건</p>
+          </Card>
+          <Card>
+            <p className="text-sm text-stone-500">지출</p>
+            <p className="text-xl sm:text-2xl font-bold tabular mt-1">-{won(expense)}</p>
+            <p className="text-xs text-stone-400 mt-2">{summary.expenseCount}건</p>
+          </Card>
+          <Card className="col-span-2 lg:col-span-1">
+            <Link to="/budget" className="block">
+              <p className="text-sm text-stone-500 flex justify-between">예산 사용률 <span className="text-xs">›</span></p>
+              <p className={`text-xl sm:text-2xl font-bold tabular mt-1 ${expense > budgetTotal ? 'text-red-500' : ''}`}>
+                {budgetTotal ? Math.round((expense / budgetTotal) * 100) : 0}%
+              </p>
+              <div className="mt-2"><ProgressBar value={expense} max={budgetTotal} color={expense > budgetTotal ? '#ef4444' : '#1c1917'} label="전체 예산 사용률" /></div>
+              <p className="text-xs text-stone-400 mt-2">예산 {won(budgetTotal)}</p>
+            </Link>
+          </Card>
+        </div>
+      );
+    }
+
+    function HomePage() {
+      const { monthly, trend, month, loading, setFormOpen } = useLedger();
+      const totals = useCategoryTotals('expense');
+      const expenseTotal = totals.reduce((s, c) => s + c.total, 0);
+      const recent = monthly.slice(0, 5);
+      return (
+        <div className="space-y-4">
+          <SummaryCards />
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            <Card className="lg:col-span-2">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-bold">카테고리별 지출</h2>
+                <Link to="/categories" className="text-xs text-stone-500 hover:text-stone-900">자세히 ›</Link>
+              </div>
+              {loading ? <Skeleton /> : expenseTotal === 0 ? <EmptyState title="이번 달 지출이 없어요" /> : (
+                <>
+                  <div className="flex justify-center"><DonutChart data={totals.filter(c => c.total)} total={expenseTotal} /></div>
+                  <ul className="mt-4 space-y-2">
+                    {totals.filter(c => c.total).slice(0, 5).map(c => (
+                      <li key={c.id} className="flex items-center gap-2 text-sm">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c.color }}></span>
+                        <span className="flex-1">{c.emoji} {c.name}</span>
+                        <span className="tabular text-stone-500">{Math.round((c.total / expenseTotal) * 100)}%</span>
+                        <span className="tabular font-medium w-24 text-right">{won(c.total)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </Card>
+            <Card className="lg:col-span-3">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="font-bold">월별 수입·지출</h2>
+                <div className="flex gap-3 text-xs text-stone-500">
+                  <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-600"></span>수입</span>
+                  <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-stone-900"></span>지출</span>
+                </div>
+              </div>
+              {loading ? <Skeleton rows={3} /> : <MonthlyChart data={trend} activeMonth={month} />}
+            </Card>
+          </div>
+          <Card>
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold">최근 내역</h2>
+              <Link to="/list" className="text-xs text-stone-500 hover:text-stone-900">전체 보기 ›</Link>
+            </div>
+            {loading ? <div className="mt-3"><Skeleton rows={3} /></div> : recent.length === 0
+              ? <EmptyState title="아직 내역이 없어요" description="‘내역 등록’으로 시작해 보세요" />
+              : <ul className="divide-y divide-stone-100">{recent.map(t => <TransactionRow key={t.id} t={t} />)}</ul>}
+            <Button variant="secondary" className="w-full mt-3" onClick={() => setFormOpen(true)}>＋ 새 내역 등록</Button>
+          </Card>
+        </div>
+      );
+    }
+
+    function ListPage() {
+      const { monthly, removeTransaction, loading } = useLedger();
+      const [type, setType] = useState('all');
+      const [category, setCategory] = useState('all');
+      const [query, setQuery] = useState('');
+
+      const categoryOptions = [{ value: 'all', label: '전체 카테고리' },
+        ...(type === 'all' ? ALL_CATEGORIES : CATEGORIES[type]).map(c => ({ value: c.id, label: `${c.emoji} ${c.name}` }))];
+
+      const filtered = useMemo(() => monthly
+        .filter(t => type === 'all' || t.type === type)
+        .filter(t => category === 'all' || t.category === category)
+        .filter(t => !query || t.memo.includes(query) || t.category.includes(query)), [monthly, type, category, query]);
+
+      const groups = useMemo(() => {
+        const g = {};
+        filtered.forEach(t => { (g[t.date] = g[t.date] || []).push(t); });
+        return Object.entries(g);
+      }, [filtered]);
+
+      const sum = filtered.reduce((s, t) => s + (t.type === 'income' ? t.amount : -t.amount), 0);
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-end justify-between">
+            <h1 className="text-2xl font-black">내역</h1>
+            <p className="text-sm text-stone-500">{filtered.length}건 · 합계 <b className={`tabular ${sum >= 0 ? 'text-emerald-600' : 'text-stone-900'}`}>{sum >= 0 ? '+' : ''}{won(sum)}</b></p>
+          </div>
+          <Card className="!p-4">
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+              <SegmentedControl value={type} onChange={(v) => { setType(v); setCategory('all'); }}
+                options={[{ value: 'all', label: '전체' }, { value: 'expense', label: '지출' }, { value: 'income', label: '수입' }]} />
+              <Select id="cat-filter" aria-label="카테고리 필터" className="sm:w-44" value={category} onChange={e => setCategory(e.target.value)} options={categoryOptions} />
+              <Input id="search" aria-label="메모 검색" className="flex-1" placeholder="🔍 메모·카테고리 검색" value={query} onChange={e => setQuery(e.target.value)} />
+            </div>
+          </Card>
+          {loading ? (
+            <Card><Skeleton rows={5} /></Card>
+          ) : groups.length === 0 ? (
+            <Card><EmptyState emoji="🔍" title="조건에 맞는 내역이 없어요" description="필터를 바꾸거나 새 내역을 등록해 보세요" /></Card>
+          ) : groups.map(([date, items]) => {
+            const daySum = items.reduce((s, t) => s + (t.type === 'income' ? t.amount : -t.amount), 0);
+            return (
+              <Card key={date} className="!py-3">
+                <div className="flex justify-between text-sm pb-1 border-b border-stone-100">
+                  <span className="font-bold text-stone-600">{formatDate(date)}</span>
+                  <span className="tabular text-stone-500">{daySum >= 0 ? '+' : ''}{won(daySum)}</span>
+                </div>
+                <ul className="divide-y divide-stone-100">{items.map(t => <TransactionRow key={t.id} t={t} onRemove={removeTransaction} />)}</ul>
+              </Card>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function CategoriesPage() {
+      const { loading } = useLedger();
+      const [type, setType] = useState('expense');
+      const totals = useCategoryTotals(type);
+      const total = totals.reduce((s, c) => s + c.total, 0);
+      const max = Math.max(...totals.map(c => c.total), 1);
+      return (
+        <div className="space-y-4">
+          <div className="flex items-end justify-between gap-3 flex-wrap">
+            <div>
+              <h1 className="text-2xl font-black">카테고리별 합계</h1>
+              <p className="text-sm text-stone-500 mt-1">이번 달 {type === 'expense' ? '지출' : '수입'} 합계 <b className="tabular text-stone-900">{won(total)}</b></p>
+            </div>
+            <SegmentedControl value={type} onChange={setType}
+              options={[{ value: 'expense', label: '지출', activeClass: 'text-red-500' }, { value: 'income', label: '수입', activeClass: 'text-emerald-600' }]} />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <Card className="flex flex-col items-center justify-center">
+              {loading ? <Skeleton rows={3} /> : total === 0 ? <EmptyState title="이번 달 기록이 없어요" />
+                : <DonutChart data={totals.filter(c => c.total)} total={total} size={220} label={type === 'expense' ? '총 지출' : '총 수입'} />}
+            </Card>
+            <Card className="lg:col-span-2">
+              <ul className="space-y-4">
+                {totals.map(c => (
+                  <li key={c.id}>
+                    <div className="flex items-center gap-3 mb-1.5">
+                      <span className="w-9 h-9 rounded-xl grid place-items-center" style={{ backgroundColor: c.color + '1f' }}>{c.emoji}</span>
+                      <span className="flex-1 font-medium">{c.name} <span className="text-xs text-stone-400 font-normal">{c.count}건</span></span>
+                      {c.total > 0 && <Badge color={c.color}>{Math.round((c.total / total) * 100)}%</Badge>}
+                      <span className={`tabular font-bold w-28 text-right ${c.total ? '' : 'text-stone-300'}`}>{won(c.total)}</span>
+                    </div>
+                    <div className="ml-12"><ProgressBar value={c.total} max={max} color={c.color} label={`${c.name} 합계`} /></div>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </div>
+        </div>
+      );
+    }
+
+    function BudgetRow({ b }) {
+      const { updateBudget } = useLedger();
+      const c = findCategory(b.category);
+      const [editing, setEditing] = useState(false);
+      const [value, setValue] = useState(String(b.budget));
+      const [err, setErr] = useState('');
+      const pct = b.budget ? Math.round((b.spent / b.budget) * 100) : (b.spent ? 100 : 0);
+      const over = b.spent > b.budget;
+      const barColor = over ? '#ef4444' : pct >= 80 ? '#f59e0b' : c.color;
+
+      const save = async (e) => {
+        e.preventDefault();
+        try { await updateBudget(b.category, Number(value || 0)); setEditing(false); setErr(''); }
+        catch (e2) { setErr(e2.message); }
+      };
+
+      return (
+        <li className="py-4">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="w-9 h-9 rounded-xl grid place-items-center shrink-0" style={{ backgroundColor: c.color + '1f' }}>{c.emoji}</span>
+            <div className="flex-1 min-w-0">
+              <p className="font-medium">{c.name}
+                {over && <span className="ml-2 text-xs text-red-500 font-bold">{won(b.spent - b.budget)} 초과</span>}
+              </p>
+              <p className="text-xs text-stone-500 tabular">{won(b.spent)} / {won(b.budget)}</p>
+            </div>
+            <span className={`tabular font-bold ${over ? 'text-red-500' : pct >= 80 ? 'text-amber-500' : 'text-stone-700'}`}>{pct}%</span>
+            {!editing && <Button size="sm" variant="ghost" onClick={() => { setValue(String(b.budget)); setEditing(true); }} aria-label={`${c.name} 예산 수정`}>수정</Button>}
+          </div>
+          <div className="ml-12"><ProgressBar value={b.spent} max={b.budget} color={barColor} label={`${c.name} 예산 사용률`} /></div>
+          {editing && (
+            <form onSubmit={save} className="ml-12 mt-3 flex gap-2 items-start">
+              <Input id={`budget-${c.id}`} aria-label={`${c.name} 월 예산`} inputMode="numeric" className="flex-1" error={err}
+                value={value ? Number(value).toLocaleString('ko-KR') : ''} onChange={e => setValue(e.target.value.replace(/[^0-9]/g, '').slice(0, 10))} autoFocus />
+              <Button type="submit">저장</Button>
+              <Button variant="secondary" onClick={() => setEditing(false)}>취소</Button>
+            </form>
+          )}
+        </li>
+      );
+    }
+
+    function BudgetPage() {
+      const { budgets, loading } = useLedger();
+      const totalBudget = budgets.reduce((s, b) => s + b.budget, 0);
+      const totalSpent = budgets.reduce((s, b) => s + b.spent, 0);
+      const overCount = budgets.filter(b => b.spent > b.budget).length;
+      return (
+        <div className="space-y-4">
+          <div>
+            <h1 className="text-2xl font-black">예산 대비 사용량</h1>
+            <p className="text-sm text-stone-500 mt-1">카테고리별 월 예산을 정하고 얼마나 썼는지 확인해요</p>
+          </div>
+          <Card>
+            <div className="flex items-end justify-between flex-wrap gap-2 mb-3">
+              <div>
+                <p className="text-sm text-stone-500">이번 달 전체</p>
+                <p className="text-2xl font-black tabular">{won(totalSpent)} <span className="text-base font-medium text-stone-400">/ {won(totalBudget)}</span></p>
+              </div>
+              <p className={`text-sm font-medium ${totalSpent > totalBudget ? 'text-red-500' : 'text-emerald-600'}`}>
+                {totalSpent > totalBudget ? `${won(totalSpent - totalBudget)} 초과` : `${won(totalBudget - totalSpent)} 남음`}
+                {overCount > 0 && <span className="ml-2 text-red-500">· 초과 카테고리 {overCount}개</span>}
+              </p>
+            </div>
+            <ProgressBar value={totalSpent} max={totalBudget} color={totalSpent > totalBudget ? '#ef4444' : '#1c1917'} label="전체 예산 사용률" />
+          </Card>
+          <Card className="!py-1">
+            {loading ? <div className="py-4"><Skeleton rows={5} /></div>
+              : <ul className="divide-y divide-stone-100">{budgets.map(b => <BudgetRow key={b.category} b={b} />)}</ul>}
+          </Card>
+        </div>
+      );
+    }
+
+    function NotFoundPage() {
+      return <Card><EmptyState emoji="🧭" title="페이지를 찾을 수 없어요" description={<Link to="/" className="underline">홈으로 돌아가기</Link>} /></Card>;
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function AppShell() {
+      const { formOpen, setFormOpen, toast } = useLedger();
+      const close = useCallback(() => setFormOpen(false), [setFormOpen]);
+      return (
+        <div className="min-h-screen pb-24 md:pb-10">
+          <Header />
+          <DbStatusBanner />
+          <main className="max-w-5xl mx-auto px-4 py-5">
+            <Routes routes={[
+              { path: '/', element: <HomePage /> },
+              { path: '/list', element: <ListPage /> },
+              { path: '/categories', element: <CategoriesPage /> },
+              { path: '/budget', element: <BudgetPage /> },
+              { path: '*', element: <NotFoundPage /> },
+            ]} />
+          </main>
+          <BottomNav />
+          <Modal isOpen={formOpen} onClose={close} title="내역 등록">
+            <TransactionForm onDone={close} />
+          </Modal>
+          {toast && (
+            <div key={toast.key} role="status" className="animate-toast fixed left-1/2 bottom-20 md:bottom-8 z-50 bg-stone-900 text-white text-sm px-4 py-2.5 rounded-full shadow-lg whitespace-nowrap">
+              {toast.msg}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function App() {
+      return (
+        <Router>
+          <LedgerProvider>
+            <AppShell />
+          </LedgerProvider>
+        </Router>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
