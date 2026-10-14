@@ -29,3 +29,7 @@ week3/class/logs/
 
 # Claude Code subagent local memory (not shared)
 .claude/agent-memory-local/
+
+# Private client / personal projects (never commit or push)
+모듈필라테스/
+새 폴더 (2)/
