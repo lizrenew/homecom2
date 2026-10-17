@@ -1,0 +1,1443 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ONDO 온도 — 미니멀 가구</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN은 버전을 명시적으로 고정한다. Babel 은 반드시 7.x -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            paper: '#F6F3EE',
+            sand: '#ECE6DC',
+            stone: '#D8D0C3',
+            ink: '#1F1D1A',
+            mute: '#7A746B',
+            clay: '#A0694B',
+          },
+          fontFamily: {
+            sans: ['Pretendard', 'system-ui', 'sans-serif'],
+            serif: ['"Cormorant Garamond"', 'Pretendard', 'serif'],
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body { background: #F6F3EE; }
+    @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+    .shimmer { background: linear-gradient(90deg, #ECE6DC 0%, #F3EFE8 50%, #ECE6DC 100%); background-size: 800px 100%; animation: shimmer 1.6s infinite linear; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+    .fade-up { animation: fadeUp .6s ease both; }
+    @keyframes slideIn { from { transform: translateX(100%); } to { transform: none; } }
+    .slide-in { animation: slideIn .35s cubic-bezier(.2,.8,.2,1) both; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+  </style>
+</head>
+<body class="font-sans text-ink antialiased">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useMemo, useCallback, useContext, createContext, useReducer, useRef } = React;
+
+    // ========================================
+    // 📦 Static UI Data (상품 데이터는 /api/products 에서 불러온다)
+    // ========================================
+    const IMG = (name) => `./images/${name}.jpg`;
+
+    const CATEGORIES = [
+      { id: 'all', label: '전체' },
+      { id: 'living', label: '거실' },
+      { id: 'dining', label: '다이닝' },
+      { id: 'bedroom', label: '침실' },
+      { id: 'lighting', label: '조명' },
+      { id: 'storage', label: '수납' },
+    ];
+
+
+    const LOOKBOOK = [
+      { id: 'look-bedroom', title: '고요한 침실', sub: 'Bedroom', products: ['p08', 'p07', 'p12'] },
+      { id: 'look-dining', title: '함께하는 식탁', sub: 'Dining', products: ['p04', 'p09', 'p05'] },
+    ];
+
+    const won = (n) => n.toLocaleString('ko-KR') + '원';
+
+    // ========================================
+    // 📡 API
+    // ========================================
+    const API_BASE_URL = '/api';
+
+    async function api(endpoint, { method = 'GET', body, token } = {}) {
+      let res;
+      try {
+        res = await fetch(`${API_BASE_URL}${endpoint}`, {
+          method,
+          headers: {
+            ...(body ? { 'Content-Type': 'application/json' } : {}),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+      } catch {
+        throw Object.assign(new Error('서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요'), { status: 0 });
+      }
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json || !json.success) {
+        throw Object.assign(new Error((json && json.message) || '요청을 처리하지 못했어요'), { status: res.status });
+      }
+      return json.data;
+    }
+
+    function useFetch(endpoint) {
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [nonce, setNonce] = useState(0);
+
+      useEffect(() => {
+        if (!endpoint) return;
+        let cancelled = false;
+        setLoading(true);
+        setError(null);
+        api(endpoint)
+          .then((d) => { if (!cancelled) setData(d); })
+          .catch((e) => { if (!cancelled) setError(e); })
+          .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+      }, [endpoint, nonce]);
+
+      const reload = useCallback(() => setNonce((n) => n + 1), []);
+      return { data, loading, error, reload };
+    }
+    const FREE_SHIPPING = 300000;
+    const SHIPPING_FEE = 30000;
+
+    // 토스페이먼츠 SDK v2 (공식 배포 경로가 /v2/standard 로 메이저 버전만 고정돼 있다). 주문서에 들어갈 때만 불러온다.
+    let tossSdkPromise;
+    function loadTossSdk() {
+      if (window.TossPayments) return Promise.resolve(window.TossPayments);
+      tossSdkPromise ??= new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://js.tosspayments.com/v2/standard';
+        s.onload = () => resolve(window.TossPayments);
+        s.onerror = () => { tossSdkPromise = null; reject(new Error('결제 모듈을 불러오지 못했어요')); };
+        document.head.appendChild(s);
+      });
+      return tossSdkPromise;
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, className = '', children, type = 'button', ...rest }) {
+      const base = 'inline-flex items-center justify-center gap-2 tracking-wide transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 focus-visible:ring-offset-2 focus-visible:ring-offset-paper disabled:opacity-40 disabled:cursor-not-allowed';
+      const variants = {
+        primary: 'bg-ink text-paper hover:bg-ink/85',
+        secondary: 'border border-ink text-ink hover:bg-ink hover:text-paper',
+        danger: 'bg-clay text-white hover:bg-clay/85',
+        ghost: 'text-ink hover:bg-sand',
+      };
+      const sizes = { sm: 'h-9 px-4 text-xs', md: 'h-11 px-6 text-sm', lg: 'h-14 px-8 text-sm' };
+      return (
+        <button type={type} disabled={disabled} onClick={onClick} className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...rest}>
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ type = 'text', label, value, onChange, placeholder, error, disabled, className = '', id, ...rest }) {
+      const inputId = id || (label ? `in-${label}` : undefined);
+      return (
+        <div className={className}>
+          {label && <label htmlFor={inputId} className="block text-xs text-mute mb-2 tracking-wide">{label}</label>}
+          <input
+            id={inputId} type={type} value={value} onChange={onChange} placeholder={placeholder} disabled={disabled}
+            aria-invalid={!!error}
+            className={`w-full h-11 bg-transparent border-b ${error ? 'border-clay' : 'border-stone focus:border-ink'} outline-none text-sm placeholder:text-mute/70 transition-colors disabled:opacity-50`}
+            {...rest}
+          />
+          {error && <p className="mt-1.5 text-xs text-clay" role="alert">{error}</p>}
+        </div>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return <div className={`bg-white/60 border border-stone/60 p-6 ${className}`}>{children}</div>;
+    }
+
+    function Badge({ children, className = '' }) {
+      return <span className={`inline-block px-2 py-0.5 text-[10px] tracking-[0.15em] bg-paper/90 text-ink ${className}`}>{children}</span>;
+    }
+
+    function Select({ value, onChange, options, label, className = '' }) {
+      return (
+        <label className={`inline-flex items-center gap-2 text-sm ${className}`}>
+          {label && <span className="sr-only">{label}</span>}
+          <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}
+            className="bg-transparent border-b border-stone py-1.5 pr-6 outline-none focus:border-ink cursor-pointer">
+            {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+      );
+    }
+
+    function QuantityStepper({ value, onChange, min = 1, max = 99 }) {
+      return (
+        <div className="inline-flex items-center border border-stone h-10" role="group" aria-label="수량">
+          <button className="w-10 h-full hover:bg-sand disabled:opacity-30" onClick={() => onChange(value - 1)} disabled={value <= min} aria-label="수량 줄이기">−</button>
+          <span className="w-10 text-center text-sm tabular-nums" aria-live="polite">{value}</span>
+          <button className="w-10 h-full hover:bg-sand disabled:opacity-30" onClick={() => onChange(value + 1)} disabled={value >= max} aria-label="수량 늘리기">+</button>
+        </div>
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, children, size = 'md' }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        document.addEventListener('keydown', onKey);
+        document.body.style.overflow = 'hidden';
+        return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = ''; };
+      }, [isOpen, onClose]);
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-2xl' };
+      return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
+          <div className="absolute inset-0 bg-ink/40 backdrop-blur-[2px]" onClick={onClose} />
+          <div className={`relative w-full ${sizes[size]} bg-paper p-8 fade-up`}>
+            <div className="flex items-start justify-between mb-6">
+              <h2 className="font-serif text-2xl">{title}</h2>
+              <button onClick={onClose} className="text-mute hover:text-ink text-xl leading-none" aria-label="닫기">×</button>
+            </div>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    // 이미지: 로딩 shimmer + 파일이 없을 때 미니멀 대체 화면
+    function FurnitureImage({ src, alt, className = '', ratio = 'aspect-[3/4]', label }) {
+      const [state, setState] = useState('loading');
+      return (
+        <div className={`relative overflow-hidden bg-sand ${ratio} ${className}`}>
+          {state === 'loading' && <div className="absolute inset-0 shimmer" aria-hidden="true" />}
+          {state === 'error' ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-mute bg-gradient-to-b from-sand to-stone/60" role="img" aria-label={alt}>
+              <svg width="56" height="56" viewBox="0 0 56 56" fill="none" stroke="currentColor" strokeWidth="1" aria-hidden="true">
+                <path d="M10 30h36v8H10z M14 38v8 M42 38v8 M14 30v-10a4 4 0 0 1 4-4h20a4 4 0 0 1 4 4v10" />
+              </svg>
+              <span className="mt-3 font-serif italic text-lg">{label || 'ONDO'}</span>
+            </div>
+          ) : (
+            <img src={src} alt={alt} loading="lazy" onLoad={() => setState('loaded')} onError={() => setState('error')}
+              className={`absolute inset-0 w-full h-full object-cover transition-all duration-700 ${state === 'loaded' ? 'opacity-100' : 'opacity-0'}`} />
+          )}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🔀 Router Components
+    // ========================================
+    const RouterContext = createContext(null);
+
+    // 토스페이먼츠 successUrl/failUrl(/payment/success?paymentKey=...)로 돌아오면 해시 라우트로 옮긴다
+    (function normalizePaymentRedirect() {
+      const { pathname, search } = window.location;
+      if (pathname === '/payment/success' || pathname === '/payment/fail') {
+        window.history.replaceState(null, '', `/#${pathname}${search}`);
+      }
+    })();
+
+    function getHashPath() {
+      const raw = window.location.hash.replace(/^#/, '') || '/';
+      const [path, query = ''] = raw.split('?');
+      return { path, query: Object.fromEntries(new URLSearchParams(query)) };
+    }
+
+    function matchRoute(pattern, path) {
+      const p = pattern.split('/').filter(Boolean);
+      const s = path.split('/').filter(Boolean);
+      if (p.length !== s.length) return null;
+      const params = {};
+      for (let i = 0; i < p.length; i++) {
+        if (p[i].startsWith(':')) params[p[i].slice(1)] = decodeURIComponent(s[i]);
+        else if (p[i] !== s[i]) return null;
+      }
+      return params;
+    }
+
+    function Router({ children }) {
+      const [loc, setLoc] = useState(getHashPath);
+      useEffect(() => {
+        const onChange = () => { setLoc(getHashPath()); window.scrollTo({ top: 0 }); };
+        window.addEventListener('hashchange', onChange);
+        return () => window.removeEventListener('hashchange', onChange);
+      }, []);
+      const navigate = useCallback((to) => { window.location.hash = to; }, []);
+      return <RouterContext.Provider value={{ ...loc, navigate, params: {} }}>{children}</RouterContext.Provider>;
+    }
+
+    function useRouter() { return useContext(RouterContext); }
+    function useParams() { return useContext(RouterContext).params; }
+
+    function Route() { return null; }
+
+    function Routes({ children }) {
+      const router = useRouter();
+      for (const child of React.Children.toArray(children)) {
+        const params = child.props.path === '*' ? {} : matchRoute(child.props.path, router.path);
+        if (params) return <RouterContext.Provider value={{ ...router, params }}>{child.props.element}</RouterContext.Provider>;
+      }
+      return null;
+    }
+
+    function Link({ to, className = '', children, ...rest }) {
+      return <a href={`#${to}`} className={className} {...rest}>{children}</a>;
+    }
+
+    // ========================================
+    // 🪑 Products (DB → /api/products)
+    // ========================================
+    // 홈·룩북·장바구니·관심 상품처럼 여러 곳에서 쓰는 전체 상품 목록을 한 번만 불러와 공유한다
+    const ProductsContext = createContext(null);
+
+    function ProductsProvider({ children }) {
+      const { data, loading, error, reload } = useFetch('/products');
+      const products = data || [];
+      const byId = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p])), [data]);
+      return <ProductsContext.Provider value={{ products, byId, loading, error, reload }}>{children}</ProductsContext.Provider>;
+    }
+
+    function useProducts() { return useContext(ProductsContext); }
+
+    // ========================================
+    // 🛒 Store (Cart & Wishlist)
+    // ========================================
+    const StoreContext = createContext(null);
+    const STORAGE_KEY = 'ondo-store-v1';
+
+    function loadStore() {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { cart: [], wish: [] }; }
+      catch { return { cart: [], wish: [] }; }
+    }
+
+    function storeReducer(state, action) {
+      switch (action.type) {
+        case 'add': {
+          const key = `${action.id}:${action.color}`;
+          const exists = state.cart.find((i) => i.key === key);
+          const cart = exists
+            ? state.cart.map((i) => (i.key === key ? { ...i, qty: Math.min(99, i.qty + action.qty) } : i))
+            : [...state.cart, { key, id: action.id, color: action.color, qty: action.qty }];
+          return { ...state, cart };
+        }
+        case 'qty': return { ...state, cart: state.cart.map((i) => (i.key === action.key ? { ...i, qty: action.qty } : i)) };
+        case 'remove': return { ...state, cart: state.cart.filter((i) => i.key !== action.key) };
+        case 'clear': return { ...state, cart: [] };
+        case 'wish': return { ...state, wish: state.wish.includes(action.id) ? state.wish.filter((w) => w !== action.id) : [...state.wish, action.id] };
+        default: return state;
+      }
+    }
+
+    function StoreProvider({ children }) {
+      const [state, dispatch] = useReducer(storeReducer, null, loadStore);
+      const { byId } = useProducts();
+      const [drawerOpen, setDrawerOpen] = useState(false);
+      const [toast, setToast] = useState(null);
+      const toastTimer = useRef();
+
+      useEffect(() => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {} }, [state]);
+
+      const items = useMemo(() => state.cart
+        .map((i) => ({ ...i, product: byId[i.id] }))
+        .filter((i) => i.product), [state.cart, byId]);
+      const subtotal = items.reduce((s, i) => s + i.product.price * i.qty, 0);
+      const count = items.reduce((s, i) => s + i.qty, 0);
+
+      const showToast = useCallback((msg) => {
+        clearTimeout(toastTimer.current);
+        setToast(msg);
+        toastTimer.current = setTimeout(() => setToast(null), 2200);
+      }, []);
+
+      const value = {
+        items, subtotal, count, wish: state.wish, dispatch, drawerOpen, setDrawerOpen, toast, showToast,
+        addToCart: (id, color, qty = 1) => { dispatch({ type: 'add', id, color, qty }); setDrawerOpen(true); },
+        toggleWish: (id) => {
+          const had = state.wish.includes(id);
+          dispatch({ type: 'wish', id });
+          showToast(had ? '관심 상품에서 뺐어요' : '관심 상품에 담았어요');
+        },
+      };
+      return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+    }
+
+    function useStore() { return useContext(StoreContext); }
+
+    // ========================================
+    // 🔐 Auth (JWT)
+    // ========================================
+    const AuthContext = createContext(null);
+    const TOKEN_KEY = 'ondo-token';
+
+    const readToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } };
+    const writeToken = (t) => { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch {} };
+
+    function AuthProvider({ children }) {
+      const [token, setToken] = useState(readToken);
+      const [user, setUser] = useState(null);
+      const [checking, setChecking] = useState(!!token);
+
+      // 저장된 토큰이 있으면 서버에 유효한지 확인한다 (만료·무효면 로그아웃 처리)
+      useEffect(() => {
+        if (!token) { setUser(null); setChecking(false); return; }
+        let cancelled = false;
+        setChecking(true);
+        api('/auth/me', { token })
+          .then((u) => { if (!cancelled) setUser(u); })
+          .catch((err) => { if (!cancelled && err.status === 401) { writeToken(null); setToken(null); } })
+          .finally(() => { if (!cancelled) setChecking(false); });
+        return () => { cancelled = true; };
+      }, [token]);
+
+      const authenticate = useCallback(async (mode, email, password) => {
+        const data = await api(`/auth/${mode}`, { method: 'POST', body: { email, password } });
+        writeToken(data.token);
+        setUser(data.user);
+        setToken(data.token);
+        return data.user;
+      }, []);
+
+      const logout = useCallback(() => { writeToken(null); setToken(null); setUser(null); }, []);
+
+      return <AuthContext.Provider value={{ user, token, checking, authenticate, logout }}>{children}</AuthContext.Provider>;
+    }
+
+    function useAuth() { return useContext(AuthContext); }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function HeartIcon({ filled }) {
+      return (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+          <path d="M12 20s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 10c0 5.65-7 10-7 10z" />
+        </svg>
+      );
+    }
+
+    function BagIcon() {
+      return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+          <path d="M5 8h14l-1 12H6L5 8z M9 8V6a3 3 0 0 1 6 0v2" />
+        </svg>
+      );
+    }
+
+    function UserIcon() {
+      return (
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+          <circle cx="12" cy="8.5" r="3.5" /><path d="M5 20c1.2-3.6 3.8-5.5 7-5.5s5.8 1.9 7 5.5" />
+        </svg>
+      );
+    }
+
+    function Header() {
+      const { path } = useRouter();
+      const { count, setDrawerOpen } = useStore();
+      const { user } = useAuth();
+      const [scrolled, setScrolled] = useState(false);
+      const [menuOpen, setMenuOpen] = useState(false);
+      const transparent = path === '/' && !scrolled && !menuOpen;
+
+      useEffect(() => {
+        const onScroll = () => setScrolled(window.scrollY > 40);
+        onScroll();
+        window.addEventListener('scroll', onScroll, { passive: true });
+        return () => window.removeEventListener('scroll', onScroll);
+      }, []);
+      useEffect(() => setMenuOpen(false), [path]);
+
+      const nav = [['/shop', '전체 상품'], ['/shop?category=living', '거실'], ['/shop?category=dining', '다이닝'], ['/shop?category=bedroom', '침실'], ['/about', '브랜드']];
+
+      return (
+        <header className={`fixed top-0 inset-x-0 z-40 transition-colors duration-300 ${transparent ? 'bg-transparent' : 'bg-paper/90 backdrop-blur border-b border-stone/50'}`}>
+          <div className="max-w-7xl mx-auto px-5 md:px-10 h-16 flex items-center justify-between">
+            <button className="md:hidden -ml-2 p-2" onClick={() => setMenuOpen((v) => !v)} aria-label="메뉴" aria-expanded={menuOpen}>
+              <span className="block w-5 h-px bg-ink mb-1.5" /><span className="block w-5 h-px bg-ink" />
+            </button>
+            <Link to="/" className="font-serif text-2xl tracking-[0.2em]" aria-label="ONDO 홈">ONDO</Link>
+            <nav className="hidden md:flex items-center gap-8 text-[13px]" aria-label="주 메뉴">
+              {nav.map(([to, label]) => <Link key={to} to={to} className="hover:text-mute transition-colors">{label}</Link>)}
+            </nav>
+            <div className="flex items-center gap-1">
+              <Link to={user ? '/account' : '/login'} className="p-2 hover:text-mute" aria-label={user ? '마이페이지' : '로그인'}><UserIcon /></Link>
+              <Link to="/wishlist" className="p-2 hover:text-mute" aria-label="관심 상품"><HeartIcon /></Link>
+              <button onClick={() => setDrawerOpen(true)} className="relative p-2 hover:text-mute" aria-label={`장바구니 ${count}개`}>
+                <BagIcon />
+                {count > 0 && <span className="absolute top-0.5 right-0 min-w-[16px] h-4 px-1 rounded-full bg-ink text-paper text-[10px] flex items-center justify-center">{count}</span>}
+              </button>
+            </div>
+          </div>
+          {menuOpen && (
+            <nav className="md:hidden border-t border-stone/50 bg-paper px-5 py-4 flex flex-col gap-4 text-sm fade-up" aria-label="모바일 메뉴">
+              {nav.map(([to, label]) => <Link key={to} to={to}>{label}</Link>)}
+            </nav>
+          )}
+        </header>
+      );
+    }
+
+    function Footer() {
+      const [email, setEmail] = useState('');
+      const [error, setError] = useState('');
+      const [done, setDone] = useState(false);
+      const submit = (e) => {
+        e.preventDefault();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError('올바른 이메일 주소를 입력해 주세요');
+        setError(''); setDone(true); setEmail('');
+      };
+      return (
+        <footer className="bg-sand mt-24">
+          <div className="max-w-7xl mx-auto px-5 md:px-10 py-16 grid gap-12 md:grid-cols-[1.4fr_1fr_1fr]">
+            <div>
+              <p className="font-serif text-3xl tracking-[0.2em]">ONDO</p>
+              <p className="mt-4 text-sm text-mute leading-relaxed max-w-xs">오래 곁에 두고 싶은 온도의 가구.<br />자연의 소재로, 덜어낸 형태로 만듭니다.</p>
+              <form onSubmit={submit} className="mt-8 max-w-sm flex items-end gap-3" noValidate>
+                <Input label="뉴스레터 구독" type="email" placeholder="you@example.com" value={email} onChange={(e) => { setEmail(e.target.value); setDone(false); }} error={error} className="flex-1" />
+                <Button type="submit" size="sm" variant="secondary">구독</Button>
+              </form>
+              {done && <p className="mt-2 text-xs text-mute" role="status">구독해 주셔서 고마워요. (데모)</p>}
+            </div>
+            <div className="text-sm space-y-3">
+              <p className="text-xs tracking-[0.2em] text-mute mb-4">SHOP</p>
+              {CATEGORIES.slice(1).map((c) => <Link key={c.id} to={`/shop?category=${c.id}`} className="block hover:text-mute">{c.label}</Link>)}
+            </div>
+            <div className="text-sm space-y-3 text-mute">
+              <p className="text-xs tracking-[0.2em] mb-4">INFO</p>
+              <p>서울시 성동구 성수이로 00 (데모)</p>
+              <p>고객센터 02-000-0000</p>
+              <p>평일 10:00 – 18:00</p>
+            </div>
+          </div>
+          <div className="border-t border-stone/70">
+            <p className="max-w-7xl mx-auto px-5 md:px-10 py-6 text-xs text-mute">© 2026 ONDO. 이 사이트는 데모이며 실제 판매가 이뤄지지 않습니다.</p>
+          </div>
+        </footer>
+      );
+    }
+
+    function ProductCard({ product, index = 0 }) {
+      const { wish, toggleWish } = useStore();
+      const wished = wish.includes(product.id);
+      return (
+        <article className="group fade-up" style={{ animationDelay: `${index * 60}ms` }}>
+          <div className="relative">
+            <Link to={`/product/${product.id}`} aria-label={product.name} className="block overflow-hidden">
+              <div className="transition-transform duration-700 group-hover:scale-[1.03]">
+                <FurnitureImage src={product.image} alt={product.name} label={product.en} />
+              </div>
+            </Link>
+            {product.badge && <Badge className="absolute top-3 left-3">{product.badge}</Badge>}
+            <button onClick={() => toggleWish(product.id)} aria-pressed={wished} aria-label={wished ? '관심 상품 해제' : '관심 상품 담기'}
+              className={`absolute top-2 right-2 p-2 transition-opacity ${wished ? 'text-clay opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'}`}>
+              <HeartIcon filled={wished} />
+            </button>
+          </div>
+          <Link to={`/product/${product.id}`} className="block mt-4">
+            <p className="text-[11px] tracking-[0.15em] text-mute uppercase">{product.en}</p>
+            <h3 className="mt-1 text-[15px]">{product.name}</h3>
+            <p className="mt-1.5 text-sm tabular-nums">
+              {product.original && <span className="text-mute line-through mr-2">{won(product.original)}</span>}
+              <span className={product.original ? 'text-clay' : ''}>{won(product.price)}</span>
+            </p>
+          </Link>
+        </article>
+      );
+    }
+
+    function SectionTitle({ eyebrow, title, action }) {
+      return (
+        <div className="flex items-end justify-between mb-10">
+          <div>
+            <p className="text-[11px] tracking-[0.25em] text-mute">{eyebrow}</p>
+            <h2 className="mt-2 font-serif text-3xl md:text-4xl">{title}</h2>
+          </div>
+          {action}
+        </div>
+      );
+    }
+
+    function CartDrawer() {
+      const { items, subtotal, dispatch, drawerOpen, setDrawerOpen } = useStore();
+      const { navigate } = useRouter();
+      useEffect(() => {
+        if (!drawerOpen) return;
+        const onKey = (e) => e.key === 'Escape' && setDrawerOpen(false);
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+      }, [drawerOpen]);
+      if (!drawerOpen) return null;
+      return (
+        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="장바구니">
+          <div className="absolute inset-0 bg-ink/30" onClick={() => setDrawerOpen(false)} />
+          <aside className="absolute right-0 top-0 h-full w-full max-w-md bg-paper flex flex-col slide-in">
+            <div className="flex items-center justify-between px-6 h-16 border-b border-stone/60">
+              <h2 className="text-sm tracking-[0.2em]">장바구니</h2>
+              <button onClick={() => setDrawerOpen(false)} className="text-xl text-mute hover:text-ink" aria-label="닫기">×</button>
+            </div>
+            {items.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-6 text-center px-6">
+                <p className="font-serif text-2xl">장바구니가 비어 있어요</p>
+                <Button variant="secondary" onClick={() => { setDrawerOpen(false); navigate('/shop'); }}>둘러보기</Button>
+              </div>
+            ) : (
+              <>
+                <ul className="flex-1 overflow-y-auto divide-y divide-stone/50 px-6">
+                  {items.map((i) => <CartLine key={i.key} item={i} onQty={(qty) => dispatch({ type: 'qty', key: i.key, qty })} onRemove={() => dispatch({ type: 'remove', key: i.key })} />)}
+                </ul>
+                <div className="border-t border-stone/60 p-6 space-y-4">
+                  <ShippingProgress subtotal={subtotal} />
+                  <div className="flex justify-between text-sm"><span>상품 금액</span><span className="tabular-nums">{won(subtotal)}</span></div>
+                  <Button className="w-full" size="lg" onClick={() => { setDrawerOpen(false); navigate('/cart'); }}>주문하기</Button>
+                </div>
+              </>
+            )}
+          </aside>
+        </div>
+      );
+    }
+
+    function CartLine({ item, onQty, onRemove }) {
+      const { product } = item;
+      return (
+        <li className="py-5 flex gap-4">
+          <Link to={`/product/${product.id}`} className="w-20 shrink-0"><FurnitureImage src={product.image} alt={product.name} label="" /></Link>
+          <div className="flex-1 min-w-0 flex flex-col">
+            <div className="flex justify-between gap-2">
+              <p className="text-sm truncate">{product.name}</p>
+              <button onClick={onRemove} className="text-xs text-mute hover:text-ink underline underline-offset-2 shrink-0">삭제</button>
+            </div>
+            <p className="text-xs text-mute mt-1">{item.color}</p>
+            <div className="mt-auto flex items-center justify-between pt-3">
+              <QuantityStepper value={item.qty} onChange={onQty} />
+              <p className="text-sm tabular-nums">{won(product.price * item.qty)}</p>
+            </div>
+          </div>
+        </li>
+      );
+    }
+
+    function ShippingProgress({ subtotal }) {
+      const pct = Math.min(100, (subtotal / FREE_SHIPPING) * 100);
+      const left = FREE_SHIPPING - subtotal;
+      return (
+        <div>
+          <p className="text-xs text-mute mb-2">{left > 0 ? <>{won(left)} 더 담으면 <span className="text-ink">무료 배송</span></> : '무료 배송이 적용돼요'}</p>
+          <div className="h-px bg-stone"><div className="h-px bg-ink transition-all duration-500" style={{ width: `${pct}%` }} /></div>
+        </div>
+      );
+    }
+
+    function Toast() {
+      const { toast } = useStore();
+      if (!toast) return null;
+      return <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] bg-ink text-paper text-sm px-5 py-3 fade-up" role="status">{toast}</div>;
+    }
+
+    function ProductGridSkeleton({ count = 4, className = 'grid-cols-2 lg:grid-cols-4' }) {
+      return (
+        <div className={`grid ${className} gap-x-4 md:gap-x-6 gap-y-12`} role="status" aria-label="상품 불러오는 중">
+          {Array.from({ length: count }, (_, i) => (
+            <div key={i}>
+              <div className="aspect-[3/4] shimmer" />
+              <div className="mt-4 h-3 w-1/3 shimmer" />
+              <div className="mt-2 h-4 w-2/3 shimmer" />
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    function LoadError({ error, onRetry }) {
+      return (
+        <div className="py-24 text-center" role="alert">
+          <p className="font-serif text-2xl">상품을 불러오지 못했어요</p>
+          <p className="mt-2 text-sm text-mute">{error.message}</p>
+          <Button variant="secondary" className="mt-8" onClick={onRetry}>다시 시도</Button>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function HomePage() {
+      const { products, byId, loading, error, reload } = useProducts();
+      const best = products.filter((p) => p.badge === 'BEST' || p.rating >= 4.8).slice(0, 4);
+      const fresh = products.filter((p) => p.badge === 'NEW').concat(products.filter((p) => !p.badge).slice(-2));
+      const grid = (list) => loading ? <ProductGridSkeleton /> : error ? <LoadError error={error} onRetry={reload} /> : (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-4 md:gap-x-6 gap-y-12">
+          {list.map((p, i) => <ProductCard key={p.id} product={p} index={i} />)}
+        </div>
+      );
+      return (
+        <div>
+          {/* Hero */}
+          <section className="relative h-[92vh] min-h-[560px]">
+            <FurnitureImage src={IMG('hero')} alt="햇살이 드는 미니멀한 거실" ratio="h-full" label="ONDO Living" />
+            <div className="absolute inset-0 bg-gradient-to-t from-ink/45 via-transparent to-paper/30" />
+            <div className="absolute inset-x-0 bottom-0 max-w-7xl mx-auto px-5 md:px-10 pb-16 md:pb-24 text-paper fade-up">
+              <p className="text-[11px] tracking-[0.3em]">2026 AUTUMN COLLECTION</p>
+              <h1 className="mt-4 font-serif text-5xl md:text-7xl leading-[1.05]">Less, but<br /><em>warmer.</em></h1>
+              <p className="mt-5 text-sm md:text-base text-paper/85 max-w-md">덜어낼수록 선명해지는 것들. 원목과 리넨, 돌과 한지로 만든 이번 계절의 가구.</p>
+              <div className="mt-8 flex gap-3">
+                <Link to="/shop" className="inline-flex items-center h-12 px-7 bg-paper text-ink text-sm tracking-wide hover:bg-sand transition-colors">컬렉션 보기</Link>
+                <Link to="/about" className="inline-flex items-center h-12 px-7 border border-paper/70 text-sm tracking-wide hover:bg-paper/10 transition-colors">브랜드 이야기</Link>
+              </div>
+            </div>
+          </section>
+
+          {/* Categories */}
+          <section className="max-w-7xl mx-auto px-5 md:px-10 pt-20">
+            <div className="flex gap-3 overflow-x-auto no-scrollbar">
+              {CATEGORIES.slice(1).map((c) => (
+                <Link key={c.id} to={`/shop?category=${c.id}`} className="shrink-0 h-10 px-5 inline-flex items-center border border-stone text-sm hover:border-ink transition-colors">{c.label}</Link>
+              ))}
+            </div>
+          </section>
+
+          {/* Best */}
+          <section className="max-w-7xl mx-auto px-5 md:px-10 pt-16">
+            <SectionTitle eyebrow="BEST SELLERS" title="오래 사랑받는 가구" action={<Link to="/shop" className="text-sm underline underline-offset-4 hover:text-mute">전체 보기</Link>} />
+            {grid(best)}
+          </section>
+
+          {/* Lookbook */}
+          <section className="max-w-7xl mx-auto px-5 md:px-10 pt-28">
+            <SectionTitle eyebrow="LOOKBOOK" title="공간으로 만나기" />
+            <div className="grid md:grid-cols-2 gap-6">
+              {LOOKBOOK.map((l) => (
+                <div key={l.id} className="group">
+                  <div className="relative overflow-hidden">
+                    <div className="transition-transform duration-700 group-hover:scale-[1.02]">
+                      <FurnitureImage src={IMG(l.id)} alt={l.title} ratio="aspect-[16/10]" label={l.sub} />
+                    </div>
+                  </div>
+                  <div className="mt-5 flex items-baseline justify-between">
+                    <div>
+                      <p className="text-[11px] tracking-[0.2em] text-mute uppercase">{l.sub}</p>
+                      <h3 className="font-serif text-2xl mt-1">{l.title}</h3>
+                    </div>
+                    <p className="text-xs text-mute text-right">
+                      {l.products.filter((id) => byId[id]).map((id) => (
+                        <Link key={id} to={`/product/${id}`} className="block hover:text-ink">{byId[id].name}</Link>
+                      ))}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Story */}
+          <section className="max-w-3xl mx-auto px-5 md:px-10 pt-32 text-center">
+            <p className="text-[11px] tracking-[0.3em] text-mute">OUR PHILOSOPHY</p>
+            <p className="mt-6 font-serif text-3xl md:text-[40px] leading-snug">“가구는 공간을 채우는 것이 아니라,<br className="hidden md:block" /> 머무는 시간을 만드는 것.”</p>
+            <div className="mt-14 grid grid-cols-3 gap-6 text-left md:text-center">
+              {[['자연 소재', 'FSC 인증 원목과 천연 섬유'], ['10년 보증', '프레임 구조 무상 수리'], ['무료 배송', '30만원 이상 설치 포함']].map(([t, d]) => (
+                <div key={t}><p className="text-sm">{t}</p><p className="mt-1 text-xs text-mute leading-relaxed">{d}</p></div>
+              ))}
+            </div>
+          </section>
+
+          {/* New */}
+          <section className="max-w-7xl mx-auto px-5 md:px-10 pt-28">
+            <SectionTitle eyebrow="NEW ARRIVALS" title="이번 계절의 새 가구" />
+            {grid(fresh.slice(0, 4))}
+          </section>
+        </div>
+      );
+    }
+
+    function ShopPage() {
+      const { query, navigate } = useRouter();
+      const category = CATEGORIES.some((c) => c.id === query.category) ? query.category : 'all';
+      const [sort, setSort] = useState('recommended');
+      const [maxPrice, setMaxPrice] = useState('all');
+
+      // 필터·정렬은 서버(DB 쿼리)에서 처리한다
+      const qs = new URLSearchParams({ category, sort, maxPrice }).toString();
+      const { data, loading, error, reload } = useFetch(`/products?${qs}`);
+      const list = data || [];
+
+      const title = CATEGORIES.find((c) => c.id === category).label;
+
+      return (
+        <div className="max-w-7xl mx-auto px-5 md:px-10 pt-32">
+          <p className="text-[11px] tracking-[0.25em] text-mute">SHOP</p>
+          <h1 className="mt-2 font-serif text-4xl md:text-5xl">{category === 'all' ? '모든 가구' : title}</h1>
+
+          <div className="mt-10 flex flex-col md:flex-row md:items-center justify-between gap-5 border-b border-stone/60 pb-5">
+            <div className="flex gap-6 overflow-x-auto no-scrollbar text-sm" role="tablist" aria-label="카테고리">
+              {CATEGORIES.map((c) => (
+                <button key={c.id} role="tab" aria-selected={category === c.id}
+                  onClick={() => navigate(c.id === 'all' ? '/shop' : `/shop?category=${c.id}`)}
+                  className={`shrink-0 pb-1 border-b transition-colors ${category === c.id ? 'border-ink text-ink' : 'border-transparent text-mute hover:text-ink'}`}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-6">
+              <Select label="가격대" value={maxPrice} onChange={setMaxPrice} options={[
+                { value: 'all', label: '모든 가격' }, { value: '500000', label: '50만원 이하' }, { value: '1000000', label: '100만원 이하' }, { value: '2000000', label: '200만원 이하' },
+              ]} />
+              <Select label="정렬" value={sort} onChange={setSort} options={[
+                { value: 'recommended', label: '추천순' }, { value: 'low', label: '낮은 가격순' }, { value: 'high', label: '높은 가격순' }, { value: 'review', label: '리뷰 많은순' },
+              ]} />
+            </div>
+          </div>
+
+          <p className="mt-6 text-xs text-mute">{loading ? '불러오는 중…' : `${list.length}개의 상품`}</p>
+          {loading ? (
+            <ProductGridSkeleton count={8} className="mt-8 grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" />
+          ) : error ? (
+            <LoadError error={error} onRetry={reload} />
+          ) : list.length === 0 ? (
+            <div className="py-32 text-center">
+              <p className="font-serif text-2xl">조건에 맞는 가구가 없어요</p>
+              <Button variant="ghost" className="mt-6 underline underline-offset-4" onClick={() => setMaxPrice('all')}>가격 필터 해제</Button>
+            </div>
+          ) : (
+            <div key={category + sort + maxPrice} className="mt-8 grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-4 md:gap-x-6 gap-y-14">
+              {list.map((p, i) => <ProductCard key={p.id} product={p} index={i} />)}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function ProductPage() {
+      const { id } = useParams();
+      const { data: product, loading, error, reload } = useFetch(`/products/${encodeURIComponent(id)}`);
+      const { products } = useProducts();
+      const { addToCart, wish, toggleWish } = useStore();
+      const [color, setColor] = useState('');
+      const [qty, setQty] = useState(1);
+      const [tab, setTab] = useState('detail');
+
+      useEffect(() => { if (product) { setColor(product.colors[0][0]); setQty(1); setTab('detail'); } }, [product]);
+
+      if (error && error.status === 404) return <NotFoundPage message="상품을 찾을 수 없어요" />;
+      if (error) return <div className="pt-24"><LoadError error={error} onRetry={reload} /></div>;
+      if (loading || !product || product.id !== id) {
+        return (
+          <div className="max-w-7xl mx-auto px-5 md:px-10 pt-28 grid md:grid-cols-[1.15fr_1fr] gap-10 lg:gap-20" role="status" aria-label="상품 불러오는 중">
+            <div className="aspect-[3/4] shimmer" />
+            <div className="space-y-4"><div className="h-3 w-1/4 shimmer" /><div className="h-10 w-2/3 shimmer" /><div className="h-6 w-1/3 shimmer" /></div>
+          </div>
+        );
+      }
+      const related = products.filter((p) => p.category === product.category && p.id !== product.id)
+        .concat(products.filter((p) => p.category !== product.category)).slice(0, 4);
+      const wished = wish.includes(product.id);
+      const catLabel = CATEGORIES.find((c) => c.id === product.category).label;
+
+      const tabs = {
+        detail: <p className="leading-relaxed">{product.desc}</p>,
+        spec: (
+          <dl className="grid grid-cols-[80px_1fr] gap-y-3">
+            <dt className="text-mute">소재</dt><dd>{product.material}</dd>
+            <dt className="text-mute">크기</dt><dd>{product.size}</dd>
+            <dt className="text-mute">원산지</dt><dd>대한민국 (데모)</dd>
+          </dl>
+        ),
+        ship: <p className="leading-relaxed">주문 후 7–14일 내 전문 기사가 방문해 설치해 드려요. 30만원 이상 무료 배송, 수령 후 14일 이내 반품 가능합니다.</p>,
+      };
+
+      return (
+        <div className="max-w-7xl mx-auto px-5 md:px-10 pt-24 md:pt-28">
+          <nav className="text-xs text-mute mb-6" aria-label="경로">
+            <Link to="/" className="hover:text-ink">홈</Link> <span className="mx-1.5">/</span>
+            <Link to={`/shop?category=${product.category}`} className="hover:text-ink">{catLabel}</Link> <span className="mx-1.5">/</span>
+            <span className="text-ink">{product.name}</span>
+          </nav>
+          <div className="grid md:grid-cols-[1.15fr_1fr] gap-10 lg:gap-20">
+            <div className="fade-up"><FurnitureImage key={product.id} src={product.image} alt={product.name} label={product.en} /></div>
+            <div className="md:sticky md:top-28 self-start fade-up" style={{ animationDelay: '80ms' }}>
+              {product.badge && <Badge className="bg-sand mb-4">{product.badge}</Badge>}
+              <p className="text-[11px] tracking-[0.2em] text-mute uppercase">{product.en}</p>
+              <h1 className="mt-2 font-serif text-4xl">{product.name}</h1>
+              <p className="mt-3 text-xs text-mute">★ {product.rating} · 리뷰 {product.reviews}개</p>
+              <p className="mt-6 text-xl tabular-nums">
+                {product.original && <span className="text-mute text-base line-through mr-3">{won(product.original)}</span>}
+                {won(product.price)}
+              </p>
+
+              <div className="mt-8">
+                <p className="text-xs text-mute mb-3">색상 — <span className="text-ink">{color}</span></p>
+                <div className="flex gap-3" role="radiogroup" aria-label="색상 선택">
+                  {product.colors.map(([name, hex]) => (
+                    <button key={name} role="radio" aria-checked={color === name} aria-label={name} onClick={() => setColor(name)}
+                      className={`w-9 h-9 rounded-full p-0.5 border transition-colors ${color === name ? 'border-ink' : 'border-transparent hover:border-stone'}`}>
+                      <span className="block w-full h-full rounded-full border border-ink/10" style={{ background: hex }} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-8 flex gap-3">
+                <QuantityStepper value={qty} onChange={setQty} />
+                <Button className="flex-1 !h-10" onClick={() => addToCart(product.id, color, qty)}>장바구니 담기 · {won(product.price * qty)}</Button>
+                <button onClick={() => toggleWish(product.id)} aria-pressed={wished} aria-label="관심 상품"
+                  className={`w-10 h-10 border border-stone flex items-center justify-center hover:border-ink ${wished ? 'text-clay' : ''}`}>
+                  <HeartIcon filled={wished} />
+                </button>
+              </div>
+
+              <div className="mt-12">
+                <div className="flex gap-6 border-b border-stone/60 text-sm" role="tablist">
+                  {[['detail', '상품 설명'], ['spec', '상세 정보'], ['ship', '배송·반품']].map(([k, label]) => (
+                    <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+                      className={`pb-3 -mb-px border-b ${tab === k ? 'border-ink' : 'border-transparent text-mute hover:text-ink'}`}>{label}</button>
+                  ))}
+                </div>
+                <div className="pt-5 text-sm min-h-[110px]" role="tabpanel">{tabs[tab]}</div>
+              </div>
+            </div>
+          </div>
+
+          <section className="pt-28">
+            <SectionTitle eyebrow="YOU MAY ALSO LIKE" title="함께 보면 좋은 가구" />
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-4 md:gap-x-6 gap-y-12">
+              {related.map((p, i) => <ProductCard key={p.id} product={p} index={i} />)}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    function CartPage() {
+      const { items, subtotal, dispatch } = useStore();
+      const { user } = useAuth();
+      const { navigate } = useRouter();
+      const shipping = subtotal === 0 || subtotal >= FREE_SHIPPING ? 0 : SHIPPING_FEE;
+
+      // 결제는 회원만: 비로그인이면 로그인 후 주문서로 돌아오게 한다
+      const placeOrder = () => navigate(user ? '/checkout' : '/login?next=/checkout');
+
+      return (
+        <div className="max-w-6xl mx-auto px-5 md:px-10 pt-32">
+          <h1 className="font-serif text-4xl md:text-5xl">장바구니</h1>
+          {items.length === 0 ? (
+            <div className="py-32 text-center">
+              <p className="font-serif text-2xl">아직 담은 가구가 없어요</p>
+              <Button variant="secondary" className="mt-8" onClick={() => navigate('/shop')}>쇼핑 계속하기</Button>
+            </div>
+          ) : (
+            <div className="mt-10 grid lg:grid-cols-[1fr_360px] gap-10 items-start">
+              <ul className="divide-y divide-stone/60 border-y border-stone/60">
+                {items.map((i) => <CartLine key={i.key} item={i} onQty={(qty) => dispatch({ type: 'qty', key: i.key, qty })} onRemove={() => dispatch({ type: 'remove', key: i.key })} />)}
+              </ul>
+              <Card className="lg:sticky lg:top-28 space-y-4 text-sm">
+                <h2 className="text-xs tracking-[0.2em] text-mute">주문 요약</h2>
+                <div className="flex justify-between"><span>상품 금액</span><span className="tabular-nums">{won(subtotal)}</span></div>
+                <div className="flex justify-between"><span>배송·설치</span><span className="tabular-nums">{shipping ? won(shipping) : '무료'}</span></div>
+                <ShippingProgress subtotal={subtotal} />
+                <div className="flex justify-between pt-4 border-t border-stone/60 text-base"><span>결제 예정 금액</span><span className="tabular-nums">{won(subtotal + shipping)}</span></div>
+                <Button className="w-full" size="lg" onClick={placeOrder}>주문서 작성</Button>
+                <p className="text-[11px] text-mute text-center">토스페이먼츠 테스트 결제로 진행돼요. 실제 돈은 빠져나가지 않아요.</p>
+              </Card>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // 토스페이먼츠 결제위젯: 주문 생성(서버가 금액 계산) → 결제 UI 렌더 → requestPayment → successUrl
+    function CheckoutPage() {
+      const { user, token, checking } = useAuth();
+      const { items } = useStore();
+      const { loading: productsLoading } = useProducts();
+      const { navigate } = useRouter();
+      const [order, setOrder] = useState(null);
+      const [status, setStatus] = useState('loading'); // loading | ready | paying | error
+      const [error, setError] = useState('');
+      const widgetsRef = useRef(null);
+      const handlesRef = useRef([]);
+      const started = useRef(false);
+
+      useEffect(() => { if (!checking && !user) navigate('/login?next=/checkout'); }, [checking, user]);
+
+      useEffect(() => {
+        // 장바구니 항목은 상품 목록이 도착해야 채워지므로 그때까지 기다린다
+        if (checking || !user || productsLoading || started.current) return;
+        if (items.length === 0) { setStatus('empty'); return; }
+        started.current = true;
+        // 결제사 네트워크가 끊기면 위젯 렌더가 끝나지 않을 수 있어 시간 제한을 둔다
+        const timer = setTimeout(() => {
+          setError('결제 화면 응답이 늦어지고 있어요. 네트워크를 확인하고 다시 시도해 주세요');
+          setStatus((s) => (s === 'loading' ? 'error' : s));
+        }, 20000);
+        (async () => {
+          try {
+            const [{ clientKey }, created, TossPayments] = await Promise.all([
+              api('/payments/config'),
+              api('/orders', { method: 'POST', token, body: { items: items.map(({ id, color, qty }) => ({ id, color, qty })) } }),
+              loadTossSdk(),
+            ]);
+            setOrder(created);
+            const widgets = TossPayments(clientKey).widgets({ customerKey: created.customerKey });
+            await widgets.setAmount({ currency: 'KRW', value: created.amount });
+            handlesRef.current = await Promise.all([
+              widgets.renderPaymentMethods({ selector: '#payment-method', variantKey: 'DEFAULT' }),
+              widgets.renderAgreement({ selector: '#agreement', variantKey: 'AGREEMENT' }),
+            ]);
+            widgetsRef.current = widgets;
+            clearTimeout(timer);
+            setStatus('ready');
+          } catch (err) {
+            clearTimeout(timer);
+            setError(err.message || '결제 화면을 불러오지 못했어요');
+            setStatus('error');
+          }
+        })();
+      }, [checking, user, productsLoading]);
+
+      // 페이지를 떠날 때만 결제 UI 정리
+      useEffect(() => () => handlesRef.current.forEach((w) => w && w.destroy && Promise.resolve(w.destroy()).catch(() => {})), []);
+
+      const pay = async () => {
+        if (!widgetsRef.current || !order) return;
+        setStatus('paying');
+        try {
+          await widgetsRef.current.requestPayment({
+            orderId: order.orderId,
+            orderName: order.orderName,
+            customerEmail: order.customerEmail,
+            // 토스가 쿼리스트링을 붙여 돌려보내므로 해시가 아닌 실제 경로로 받고, 앱 시작 시 해시 라우트로 바꾼다
+            successUrl: `${window.location.origin}/payment/success`,
+            failUrl: `${window.location.origin}/payment/fail`,
+          });
+        } catch (err) {
+          // 결제창을 닫은 경우 등: 주문서에 그대로 머문다
+          setStatus('ready');
+          if (err && err.code !== 'USER_CANCEL') setError(err.message || '결제를 요청하지 못했어요');
+        }
+      };
+
+      if (status === 'empty') {
+        return (
+          <div className="py-40 text-center">
+            <p className="font-serif text-2xl">주문할 상품이 없어요</p>
+            <Button variant="secondary" className="mt-8" onClick={() => navigate('/shop')}>쇼핑하러 가기</Button>
+          </div>
+        );
+      }
+
+      return (
+        <div className="max-w-6xl mx-auto px-5 md:px-10 pt-32">
+          <p className="text-[11px] tracking-[0.25em] text-mute">CHECKOUT</p>
+          <h1 className="mt-2 font-serif text-4xl md:text-5xl">주문서</h1>
+          <div className="mt-10 grid lg:grid-cols-[1fr_380px] gap-10 items-start">
+            <section aria-label="결제 수단">
+              {status === 'loading' && <div className="h-80 shimmer" role="status" aria-label="결제 화면 불러오는 중" />}
+              {status === 'error' && (
+                <div className="py-16 text-center border border-stone" role="alert">
+                  <p className="font-serif text-2xl">결제 화면을 열지 못했어요</p>
+                  <p className="mt-2 text-sm text-mute">{error}</p>
+                  <div className="mt-8 flex gap-3 justify-center">
+                    <Button onClick={() => window.location.reload()}>다시 시도</Button>
+                    <Button variant="secondary" onClick={() => navigate('/cart')}>장바구니로</Button>
+                  </div>
+                </div>
+              )}
+              <div className={status === 'loading' || status === 'error' ? 'hidden' : ''}>
+                <div id="payment-method" />
+                <div id="agreement" />
+              </div>
+            </section>
+            <Card className="lg:sticky lg:top-28 text-sm">
+              <h2 className="text-xs tracking-[0.2em] text-mute">주문 상품</h2>
+              {order ? (
+                <>
+                  <ul className="mt-4 space-y-3">
+                    {order.items.map((i) => (
+                      <li key={i.id + i.color} className="flex justify-between gap-3">
+                        <span className="min-w-0 truncate">{i.name} <span className="text-mute">· {i.color} × {i.qty}</span></span>
+                        <span className="tabular-nums shrink-0">{won(i.lineTotal)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-6 pt-4 border-t border-stone/60 space-y-2">
+                    <div className="flex justify-between"><span className="text-mute">상품 금액</span><span className="tabular-nums">{won(order.subtotal)}</span></div>
+                    <div className="flex justify-between"><span className="text-mute">배송·설치</span><span className="tabular-nums">{order.shipping ? won(order.shipping) : '무료'}</span></div>
+                    <div className="flex justify-between pt-3 text-base"><span>최종 결제 금액</span><span className="tabular-nums">{won(order.amount)}</span></div>
+                  </div>
+                  <p className="mt-4 text-xs text-mute">주문자 {order.customerEmail}</p>
+                </>
+              ) : <div className="mt-4 h-24 shimmer" />}
+              {error && status === 'ready' && <p className="mt-4 text-xs text-clay" role="alert">{error}</p>}
+              <Button className="w-full mt-6" size="lg" onClick={pay} disabled={status !== 'ready'}>
+                {status === 'paying' ? '결제창 여는 중…' : order ? `${won(order.amount)} 결제하기` : '결제하기'}
+              </Button>
+            </Card>
+          </div>
+        </div>
+      );
+    }
+
+    function PaymentSuccessPage() {
+      const { query, navigate } = useRouter();
+      const { token, checking } = useAuth();
+      const { dispatch } = useStore();
+      const [result, setResult] = useState(null);
+      const [error, setError] = useState('');
+      const sent = useRef(false);
+
+      useEffect(() => {
+        if (checking || sent.current) return;
+        if (!token) { setError('로그인이 풀렸어요. 다시 로그인한 뒤 마이페이지에서 결제 내역을 확인해 주세요'); return; }
+        sent.current = true;
+        const { paymentKey, orderId, amount } = query;
+        api('/payments/confirm', { method: 'POST', token, body: { paymentKey, orderId, amount: Number(amount) } })
+          .then((order) => { setResult(order); dispatch({ type: 'clear' }); })
+          .catch((err) => setError(err.message));
+      }, [checking, token]);
+
+      return (
+        <div className="max-w-xl mx-auto px-5 pt-40 text-center">
+          {!result && !error && (
+            <div role="status">
+              <div className="mx-auto w-10 h-10 border border-ink border-t-transparent rounded-full animate-spin" />
+              <p className="mt-6 text-sm text-mute">결제를 승인하고 있어요…</p>
+            </div>
+          )}
+          {error && (
+            <div role="alert">
+              <p className="font-serif text-3xl">결제를 완료하지 못했어요</p>
+              <p className="mt-3 text-sm text-mute">{error}</p>
+              <Button variant="secondary" className="mt-8" onClick={() => navigate('/cart')}>장바구니로</Button>
+            </div>
+          )}
+          {result && (
+            <div className="fade-up">
+              <p className="text-[11px] tracking-[0.3em] text-mute">THANK YOU</p>
+              <h1 className="mt-3 font-serif text-4xl">결제가 완료되었어요</h1>
+              <Card className="mt-10 text-left text-sm space-y-3">
+                <div className="flex justify-between gap-4"><span className="text-mute">주문 상품</span><span className="truncate">{result.orderName}</span></div>
+                <div className="flex justify-between"><span className="text-mute">결제 수단</span><span>{result.method || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-mute">결제 금액</span><span className="tabular-nums">{won(result.amount)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-mute">주문 번호</span><span className="text-xs truncate">{result.orderId}</span></div>
+              </Card>
+              <div className="mt-8 flex gap-3 justify-center">
+                <Button onClick={() => navigate('/account')}>마이페이지에서 보기</Button>
+                <Button variant="secondary" onClick={() => navigate('/shop')}>쇼핑 계속하기</Button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function PaymentFailPage() {
+      const { query, navigate } = useRouter();
+      return (
+        <div className="max-w-xl mx-auto px-5 pt-40 text-center" role="alert">
+          <p className="font-serif text-3xl">결제가 진행되지 않았어요</p>
+          <p className="mt-3 text-sm text-mute">{query.message || '결제가 취소되었거나 실패했어요.'}</p>
+          {query.code && <p className="mt-1 text-xs text-mute">({query.code})</p>}
+          <Button className="mt-8" onClick={() => navigate('/checkout')}>다시 결제하기</Button>
+        </div>
+      );
+    }
+
+    function WishlistPage() {
+      const { wish } = useStore();
+      const { products, loading } = useProducts();
+      const list = products.filter((p) => wish.includes(p.id));
+      if (loading) return <div className="max-w-7xl mx-auto px-5 md:px-10 pt-32"><ProductGridSkeleton /></div>;
+      return (
+        <div className="max-w-7xl mx-auto px-5 md:px-10 pt-32">
+          <h1 className="font-serif text-4xl md:text-5xl">관심 상품</h1>
+          {list.length === 0 ? (
+            <div className="py-32 text-center">
+              <p className="font-serif text-2xl">마음에 드는 가구에 하트를 눌러보세요</p>
+              <Link to="/shop" className="inline-block mt-8 text-sm underline underline-offset-4">가구 둘러보기</Link>
+            </div>
+          ) : (
+            <div className="mt-10 grid grid-cols-2 lg:grid-cols-4 gap-x-4 md:gap-x-6 gap-y-12">
+              {list.map((p, i) => <ProductCard key={p.id} product={p} index={i} />)}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function AboutPage() {
+      return (
+        <div className="pt-32">
+          <section className="max-w-3xl mx-auto px-5 md:px-10 text-center fade-up">
+            <p className="text-[11px] tracking-[0.3em] text-mute">ABOUT ONDO</p>
+            <h1 className="mt-4 font-serif text-5xl md:text-6xl">온도, 溫度</h1>
+            <p className="mt-8 text-[15px] leading-loose text-mute">
+              ONDO는 손에 닿는 가구의 온도를 생각합니다. 차갑지 않은 원목, 숨 쉬는 리넨, 빛을 머금은 한지.
+              유행보다 오래 남는 형태를 위해 장식을 덜어내고, 소재가 가진 결을 그대로 드러냅니다.
+            </p>
+          </section>
+          <section className="max-w-7xl mx-auto px-5 md:px-10 mt-20">
+            <FurnitureImage src={IMG('look-dining')} alt="ONDO 다이닝 공간" ratio="aspect-[16/9]" label="Made to last" />
+          </section>
+          <section className="max-w-5xl mx-auto px-5 md:px-10 mt-20 grid md:grid-cols-3 gap-10">
+            {[['01', '소재', '추적 가능한 원목과 천연 섬유만 사용합니다.'], ['02', '제작', '국내 공방에서 장인이 한 점씩 마감합니다.'], ['03', '수명', '구조 10년 보증, 부품 교체와 수리를 지원합니다.']].map(([n, t, d]) => (
+              <div key={n} className="border-t border-ink pt-5">
+                <p className="font-serif text-xl italic text-mute">{n}</p>
+                <p className="mt-2 text-lg">{t}</p>
+                <p className="mt-2 text-sm text-mute leading-relaxed">{d}</p>
+              </div>
+            ))}
+          </section>
+        </div>
+      );
+    }
+
+    // 로그인·회원가입 공용 폼
+    function AuthPage({ mode }) {
+      const isSignup = mode === 'signup';
+      const { user, authenticate } = useAuth();
+      const { navigate, query } = useRouter();
+      const next = query.next && query.next.startsWith('/') ? query.next : '/';
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [confirm, setConfirm] = useState('');
+      const [errors, setErrors] = useState({});
+      const [serverError, setServerError] = useState('');
+      const [submitting, setSubmitting] = useState(false);
+
+      useEffect(() => { if (user) navigate(next); }, [user]);
+      useEffect(() => { setErrors({}); setServerError(''); setPassword(''); setConfirm(''); }, [mode]);
+
+      const validate = () => {
+        const e = {};
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) e.email = '이메일 형식을 확인해 주세요';
+        if (isSignup) {
+          if (password.length < 8 || password.length > 72) e.password = '비밀번호는 8~72자로 입력해 주세요';
+          if (confirm !== password) e.confirm = '비밀번호가 서로 달라요';
+        } else if (!password) e.password = '비밀번호를 입력해 주세요';
+        setErrors(e);
+        return Object.keys(e).length === 0;
+      };
+
+      const submit = async (ev) => {
+        ev.preventDefault();
+        setServerError('');
+        if (!validate()) return;
+        setSubmitting(true);
+        try {
+          await authenticate(mode, email.trim(), password);
+        } catch (err) {
+          setServerError(err.message);
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      const nextQs = next !== '/' ? `?next=${encodeURIComponent(next)}` : '';
+
+      return (
+        <div className="min-h-screen grid md:grid-cols-2">
+          <div className="hidden md:block relative">
+            <FurnitureImage src={IMG(isSignup ? 'look-bedroom' : 'hero')} alt="" ratio="h-full" label="ONDO" />
+          </div>
+          <div className="flex items-center justify-center px-5 pt-32 pb-16 md:pt-24">
+            <form onSubmit={submit} className="w-full max-w-sm fade-up" noValidate>
+              <p className="text-[11px] tracking-[0.25em] text-mute">{isSignup ? 'CREATE ACCOUNT' : 'WELCOME BACK'}</p>
+              <h1 className="mt-2 font-serif text-4xl">{isSignup ? '회원가입' : '로그인'}</h1>
+              <p className="mt-3 text-sm text-mute">{isSignup ? '이메일과 비밀번호만으로 가입할 수 있어요.' : '이메일과 비밀번호로 로그인하세요.'}</p>
+
+              <div className="mt-10 space-y-6">
+                <Input label="이메일" type="email" autoComplete="email" placeholder="you@example.com" value={email}
+                  onChange={(e) => setEmail(e.target.value)} error={errors.email} disabled={submitting} />
+                <Input label="비밀번호" type="password" autoComplete={isSignup ? 'new-password' : 'current-password'}
+                  placeholder={isSignup ? '8자 이상' : ''} value={password}
+                  onChange={(e) => setPassword(e.target.value)} error={errors.password} disabled={submitting} />
+                {isSignup && (
+                  <Input label="비밀번호 확인" type="password" autoComplete="new-password" value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)} error={errors.confirm} disabled={submitting} />
+                )}
+              </div>
+
+              {serverError && <p className="mt-6 text-sm text-clay" role="alert">{serverError}</p>}
+
+              <Button type="submit" size="lg" className="w-full mt-10" disabled={submitting}>
+                {submitting ? '잠시만요…' : isSignup ? '가입하기' : '로그인'}
+              </Button>
+
+              <p className="mt-6 text-center text-sm text-mute">
+                {isSignup ? '이미 계정이 있나요? ' : '아직 회원이 아니세요? '}
+                <Link to={`${isSignup ? '/login' : '/signup'}${nextQs}`} className="text-ink underline underline-offset-4">
+                  {isSignup ? '로그인' : '회원가입'}
+                </Link>
+              </p>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    function AccountPage() {
+      const { user, token, checking, logout } = useAuth();
+      const { navigate } = useRouter();
+      const { count, wish } = useStore();
+      const loggingOut = useRef(false);
+
+      // 직접 로그아웃한 경우엔 로그인 페이지 대신 홈으로 보낸다
+      useEffect(() => { if (!checking && !user && !loggingOut.current) navigate('/login?next=/account'); }, [checking, user]);
+
+      if (checking || !user) {
+        return <div className="min-h-[70vh] flex items-center justify-center text-sm text-mute" role="status">불러오는 중…</div>;
+      }
+      return (
+        <div className="max-w-3xl mx-auto px-5 md:px-10 pt-32">
+          <p className="text-[11px] tracking-[0.25em] text-mute">MY PAGE</p>
+          <h1 className="mt-2 font-serif text-4xl md:text-5xl">마이페이지</h1>
+          <Card className="mt-10 space-y-4 text-sm">
+            <div className="flex justify-between gap-4"><span className="text-mute">이메일</span><span className="truncate">{user.email}</span></div>
+            <div className="flex justify-between"><span className="text-mute">가입일</span><span>{new Date(user.createdAt).toLocaleDateString('ko-KR')}</span></div>
+          </Card>
+          <div className="mt-6 grid grid-cols-2 gap-4">
+            <Link to="/cart" className="border border-stone p-6 hover:border-ink transition-colors"><p className="text-xs text-mute">장바구니</p><p className="mt-1 font-serif text-3xl">{count}</p></Link>
+            <Link to="/wishlist" className="border border-stone p-6 hover:border-ink transition-colors"><p className="text-xs text-mute">관심 상품</p><p className="mt-1 font-serif text-3xl">{wish.length}</p></Link>
+          </div>
+          <OrderHistory token={token} />
+          <Button variant="secondary" className="mt-12" onClick={() => { loggingOut.current = true; logout(); navigate('/'); }}>로그아웃</Button>
+        </div>
+      );
+    }
+
+    const PAY_STATUS = { DONE: '결제 완료', CANCELED: '결제 취소', PARTIAL_CANCELED: '부분 취소', ABORTED: '결제 실패', EXPIRED: '만료' };
+
+    function OrderHistory({ token }) {
+      const [orders, setOrders] = useState(null);
+      const [error, setError] = useState('');
+      const [open, setOpen] = useState(null);
+
+      useEffect(() => {
+        let cancelled = false;
+        api('/orders', { token })
+          .then((d) => { if (!cancelled) setOrders(d); })
+          .catch((e) => { if (!cancelled) setError(e.message); });
+        return () => { cancelled = true; };
+      }, [token]);
+
+      return (
+        <section className="mt-14" aria-label="결제 내역">
+          <h2 className="text-xs tracking-[0.2em] text-mute">결제 내역</h2>
+          {error ? (
+            <p className="mt-6 text-sm text-clay" role="alert">{error}</p>
+          ) : !orders ? (
+            <div className="mt-6 space-y-3" role="status" aria-label="결제 내역 불러오는 중"><div className="h-20 shimmer" /><div className="h-20 shimmer" /></div>
+          ) : orders.length === 0 ? (
+            <div className="mt-6 py-12 text-center border border-stone/60">
+              <p className="text-sm text-mute">아직 결제한 주문이 없어요</p>
+              <Link to="/shop" className="inline-block mt-4 text-sm underline underline-offset-4">가구 둘러보기</Link>
+            </div>
+          ) : (
+            <ul className="mt-6 divide-y divide-stone/60 border-y border-stone/60">
+              {orders.map((o) => (
+                <li key={o.orderId} className="py-5">
+                  <button className="w-full flex items-center gap-4 text-left" onClick={() => setOpen(open === o.orderId ? null : o.orderId)} aria-expanded={open === o.orderId}>
+                    <div className="w-14 shrink-0"><FurnitureImage src={o.items[0].image} alt="" label="" /></div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-mute">{new Date(o.approvedAt || o.createdAt).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                      <p className="mt-1 text-sm truncate">{o.orderName}</p>
+                      <p className="mt-1 text-xs text-mute">{o.method || '-'} · <span className={o.status === 'DONE' ? 'text-ink' : 'text-clay'}>{PAY_STATUS[o.status] || o.status}</span></p>
+                    </div>
+                    <p className="text-sm tabular-nums shrink-0">{won(o.amount)}</p>
+                  </button>
+                  {open === o.orderId && (
+                    <div className="mt-4 ml-[72px] text-xs space-y-1.5 fade-up">
+                      {o.items.map((i) => (
+                        <div key={i.id + i.color} className="flex justify-between gap-3">
+                          <span className="text-mute truncate">{i.name} · {i.color} × {i.qty}</span><span className="tabular-nums">{won(i.lineTotal)}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between text-mute"><span>배송·설치</span><span>{o.shipping ? won(o.shipping) : '무료'}</span></div>
+                      <p className="pt-2 text-mute break-all">주문번호 {o.orderId}</p>
+                      {o.receiptUrl && <a href={o.receiptUrl} target="_blank" rel="noopener noreferrer" className="inline-block pt-1 underline underline-offset-2">영수증 보기 ↗</a>}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      );
+    }
+
+    function NotFoundPage({ message = '페이지를 찾을 수 없어요' }) {
+      return (
+        <div className="min-h-[70vh] flex flex-col items-center justify-center text-center px-5 pt-16">
+          <p className="font-serif text-7xl italic text-stone">404</p>
+          <p className="mt-4 font-serif text-2xl">{message}</p>
+          <Link to="/" className="mt-8 text-sm underline underline-offset-4">홈으로 돌아가기</Link>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return (
+        <Router>
+          <AuthProvider>
+          <ProductsProvider>
+          <StoreProvider>
+            <Header />
+            <main className="min-h-screen">
+              <Routes>
+                <Route path="/" element={<HomePage />} />
+                <Route path="/shop" element={<ShopPage />} />
+                <Route path="/product/:id" element={<ProductPage />} />
+                <Route path="/cart" element={<CartPage />} />
+                <Route path="/wishlist" element={<WishlistPage />} />
+                <Route path="/about" element={<AboutPage />} />
+                <Route path="/login" element={<AuthPage mode="login" />} />
+                <Route path="/signup" element={<AuthPage mode="signup" />} />
+                <Route path="/account" element={<AccountPage />} />
+                <Route path="/checkout" element={<CheckoutPage />} />
+                <Route path="/payment/success" element={<PaymentSuccessPage />} />
+                <Route path="/payment/fail" element={<PaymentFailPage />} />
+                <Route path="*" element={<NotFoundPage />} />
+              </Routes>
+            </main>
+            <Footer />
+            <CartDrawer />
+            <Toast />
+          </StoreProvider>
+          </ProductsProvider>
+          </AuthProvider>
+        </Router>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
