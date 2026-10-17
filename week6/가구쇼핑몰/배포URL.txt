@@ -1,0 +1,12 @@
+ONDO 온도 (week6 미니멀 가구 쇼핑몰)
+
+배포 URL (Vercel): https://ondo-furniture.vercel.app
+
+기능
+- 상품 12개: Supabase Postgres(furn_products)에서 불러옴 · 카테고리/가격/정렬 필터
+- 회원가입·로그인: 이메일 + 비밀번호, JWT 토큰 인증
+- 장바구니 · 관심 상품
+- 결제: 토스페이먼츠 주문서형(결제위젯) 테스트 결제 — 실제 돈은 빠져나가지 않음
+- 마이페이지: 결제 내역 확인 (주문 상품 · 결제수단 · 영수증 링크)
+
+Vercel 환경변수 (Production): DATABASE_URL, JWT_SECRET, TOSS_CLIENT_KEY, TOSS_SECRET_KEY
